@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Transaction, Bank, Category } from '../lib/types';
-import { TrendingUp, TrendingDown, Wallet, Calendar, Filter, Plus } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, Calendar, Filter } from 'lucide-react';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
+  const [, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedBank, setSelectedBank] = useState<string>('all');
   const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'all'>('month');

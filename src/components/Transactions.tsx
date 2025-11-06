@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Upload as UploadIcon, FileText, CheckCircle, AlertCircle, Sparkles, Building, Trash2, Plus, Edit2, ChevronDown, ChevronUp, Save, X, Wallet, Eye, Check } from 'lucide-react';
+import { Upload as UploadIcon, FileText, CheckCircle, AlertCircle, Sparkles, Building, Trash2, Plus, Edit2, ChevronDown, ChevronUp, Save, X, Wallet, Eye } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Bank, Category, Transaction } from '../lib/types';
+import { Bank, Category } from '../lib/types';
 import { PDFParser, ParsedTransaction } from '../services/pdfParser';
 import { AIService } from '../services/aiService';
 import CashTransaction from './CashTransaction';
@@ -82,8 +82,8 @@ export default function Transactions() {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       const fileType = selectedFile.name.split('.').pop()?.toLowerCase();
-      if (!['csv', 'pdf', 'xlsx', 'xls'].includes(fileType || '')) {
-        setStatus({ type: 'error', message: 'Please upload a CSV, PDF, or Excel file' });
+      if (!['csv', 'pdf', 'xlsx', 'xls', 'txt'].includes(fileType || '')) {
+        setStatus({ type: 'error', message: 'Please upload a CSV, PDF, Excel or Text file' });
         return;
       }
       setFile(selectedFile);
@@ -116,6 +116,16 @@ export default function Transactions() {
         text = await parser.extractTextFromPDF(file);
         bankInfo = parser.detectBankFromText(text);
         transactions = parser.parseTransactions(text);
+      } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        transactions = await parser.parseExcel(file);
+        const arrayBuffer = await file.arrayBuffer();
+        const textDecoder = new TextDecoder();
+        text = textDecoder.decode(arrayBuffer).substring(0, 5000);
+        bankInfo = parser.detectBankFromText(text);
+      } else if (file.name.endsWith('.txt')) {
+        text = await file.text();
+        transactions = parser.parseTransactions(text);
+        bankInfo = parser.detectBankFromText(text);
       } else {
         throw new Error('Unsupported file format');
       }
@@ -760,7 +770,7 @@ export default function Transactions() {
         <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-blue-400 transition-colors">
           <input
             type="file"
-            accept=".csv,.pdf,.xlsx,.xls"
+            accept=".csv,.pdf,.xlsx,.xls,.txt"
             onChange={handleFileChange}
             className="hidden"
             id="file-upload"
@@ -778,7 +788,7 @@ export default function Transactions() {
               <>
                 <UploadIcon className="w-12 h-12 text-gray-400 mb-3" />
                 <p className="font-medium text-gray-900">Click to upload</p>
-                <p className="text-sm text-gray-500 mt-1">CSV, PDF, or Excel</p>
+                <p className="text-sm text-gray-500 mt-1">PDF, CSV, Excel, or Text</p>
               </>
             )}
           </label>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Plus, CheckCircle, XCircle, UserPlus, DollarSign, X } from 'lucide-react';
+import { Users, Plus, CheckCircle, UserPlus, DollarSign, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { SharedTransaction, Transaction, Category } from '../lib/types';
@@ -11,7 +11,7 @@ interface SharedExpenseWithDetails extends SharedTransaction {
 }
 
 export default function SharedExpenses() {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const [sharedExpenses, setSharedExpenses] = useState<SharedExpenseWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);

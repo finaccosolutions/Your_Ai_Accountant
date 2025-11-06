@@ -3,7 +3,7 @@ import { User, Key, LogOut, Save } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Profile() {
-  const { user, profile, signOut, updateProfile } = useAuth();
+  const { profile, signOut, updateProfile } = useAuth();
   const [geminiKey, setGeminiKey] = useState('');
   const [saving, setSaving] = useState(false);
 
