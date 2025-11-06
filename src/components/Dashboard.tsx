@@ -1,0 +1,269 @@
+import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { Transaction, Bank, Category } from '../lib/types';
+import { TrendingUp, TrendingDown, Wallet, Calendar, Filter } from 'lucide-react';
+
+export default function Dashboard() {
+  const { user } = useAuth();
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [banks, setBanks] = useState<Bank[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedBank, setSelectedBank] = useState<string>('all');
+  const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'all'>('month');
+
+  useEffect(() => {
+    if (user) {
+      loadData();
+    }
+  }, [user, selectedBank, dateRange]);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+
+      const [banksResult, categoriesResult] = await Promise.all([
+        supabase.from('banks').select('*').eq('user_id', user!.id).eq('is_active', true),
+        supabase.from('categories').select('*').or(`user_id.eq.${user!.id},is_system.eq.true`),
+      ]);
+
+      if (banksResult.data) setBanks(banksResult.data);
+      if (categoriesResult.data) setCategories(categoriesResult.data);
+
+      let query = supabase
+        .from('transactions')
+        .select('*, bank:banks(*), category:categories(*)')
+        .eq('user_id', user!.id)
+        .eq('is_approved', true)
+        .order('transaction_date', { ascending: false });
+
+      if (selectedBank !== 'all') {
+        query = query.eq('bank_id', selectedBank);
+      }
+
+      const now = new Date();
+      if (dateRange === 'today') {
+        const today = now.toISOString().split('T')[0];
+        query = query.gte('transaction_date', today);
+      } else if (dateRange === 'week') {
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        query = query.gte('transaction_date', weekAgo.toISOString().split('T')[0]);
+      } else if (dateRange === 'month') {
+        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        query = query.gte('transaction_date', monthAgo.toISOString().split('T')[0]);
+      }
+
+      const transactionsResult = await query;
+
+      if (transactionsResult.data) {
+        setTransactions(transactionsResult.data);
+      }
+    } catch (error) {
+      console.error('Error loading data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const totalIncome = transactions
+    .filter(t => t.type === 'credit')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const totalExpense = transactions
+    .filter(t => t.type === 'debit')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const balance = totalIncome - totalExpense;
+
+  const categoryExpenses = transactions
+    .filter(t => t.type === 'debit' && t.category)
+    .reduce((acc, t) => {
+      const catName = t.category!.name;
+      acc[catName] = (acc[catName] || 0) + t.amount;
+      return acc;
+    }, {} as Record<string, number>);
+
+  const topCategories = Object.entries(categoryExpenses)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
+          <div className="flex items-center gap-2 text-green-600 mb-2">
+            <TrendingUp className="w-5 h-5" />
+            <span className="text-sm font-medium">Income</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">₹{totalIncome.toLocaleString()}</p>
+        </div>
+
+        <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
+          <div className="flex items-center gap-2 text-red-600 mb-2">
+            <TrendingDown className="w-5 h-5" />
+            <span className="text-sm font-medium">Expenses</span>
+          </div>
+          <p className="text-2xl font-bold text-gray-900">₹{totalExpense.toLocaleString()}</p>
+        </div>
+      </div>
+
+      <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-6 text-white shadow-xl">
+        <div className="flex items-center gap-2 mb-2">
+          <Wallet className="w-6 h-6" />
+          <span className="text-sm font-medium opacity-90">Net Balance</span>
+        </div>
+        <p className="text-4xl font-bold mb-1">₹{balance.toLocaleString()}</p>
+        <p className="text-sm opacity-75">
+          {dateRange === 'today' ? 'Today' : dateRange === 'week' ? 'This Week' : dateRange === 'month' ? 'This Month' : 'All Time'}
+        </p>
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-2">
+        <button
+          onClick={() => setDateRange('today')}
+          className={`px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all ${
+            dateRange === 'today'
+              ? 'bg-purple-600 text-white shadow-lg'
+              : 'bg-white/80 text-gray-700 hover:bg-white'
+          }`}
+        >
+          Today
+        </button>
+        <button
+          onClick={() => setDateRange('week')}
+          className={`px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all ${
+            dateRange === 'week'
+              ? 'bg-purple-600 text-white shadow-lg'
+              : 'bg-white/80 text-gray-700 hover:bg-white'
+          }`}
+        >
+          Week
+        </button>
+        <button
+          onClick={() => setDateRange('month')}
+          className={`px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all ${
+            dateRange === 'month'
+              ? 'bg-purple-600 text-white shadow-lg'
+              : 'bg-white/80 text-gray-700 hover:bg-white'
+          }`}
+        >
+          Month
+        </button>
+        <button
+          onClick={() => setDateRange('all')}
+          className={`px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all ${
+            dateRange === 'all'
+              ? 'bg-purple-600 text-white shadow-lg'
+              : 'bg-white/80 text-gray-700 hover:bg-white'
+          }`}
+        >
+          All
+        </button>
+      </div>
+
+      {banks.length > 0 && (
+        <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
+          <div className="flex items-center gap-2 mb-3">
+            <Filter className="w-5 h-5 text-gray-600" />
+            <span className="font-medium text-gray-900">Filter by Bank</span>
+          </div>
+          <select
+            value={selectedBank}
+            onChange={(e) => setSelectedBank(e.target.value)}
+            className="w-full px-4 py-2 rounded-xl border border-gray-300 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+          >
+            <option value="all">All Banks</option>
+            {banks.map(bank => (
+              <option key={bank.id} value={bank.id}>
+                {bank.bank_name} - {bank.account_number}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {topCategories.length > 0 && (
+        <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
+          <h3 className="font-semibold text-gray-900 mb-4">Top Spending Categories</h3>
+          <div className="space-y-3">
+            {topCategories.map(([category, amount]) => {
+              const percentage = (amount / totalExpense) * 100;
+              return (
+                <div key={category}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="font-medium text-gray-700">{category}</span>
+                    <span className="font-semibold text-gray-900">₹{amount.toLocaleString()}</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-gradient-to-r from-blue-500 to-purple-500 h-full rounded-full transition-all"
+                      style={{ width: `${percentage}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
+        <h3 className="font-semibold text-gray-900 mb-4">Recent Transactions</h3>
+        {transactions.length === 0 ? (
+          <p className="text-gray-500 text-center py-8">No transactions yet</p>
+        ) : (
+          <div className="space-y-3">
+            {transactions.slice(0, 10).map((transaction) => (
+              <div
+                key={transaction.id}
+                className="flex items-center justify-between p-3 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center gap-3 flex-1">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    transaction.type === 'credit'
+                      ? 'bg-green-100 text-green-600'
+                      : 'bg-red-100 text-red-600'
+                  }`}>
+                    {transaction.type === 'credit' ? (
+                      <TrendingUp className="w-5 h-5" />
+                    ) : (
+                      <TrendingDown className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900 truncate">
+                      {transaction.final_description || transaction.ai_description || transaction.original_description}
+                    </p>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <Calendar className="w-3 h-3" />
+                      <span>{new Date(transaction.transaction_date).toLocaleDateString()}</span>
+                      {transaction.category && (
+                        <span className="px-2 py-0.5 bg-gray-100 rounded-full">
+                          {transaction.category.name}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className={`font-bold ${
+                  transaction.type === 'credit' ? 'text-green-600' : 'text-red-600'
+                }`}>
+                  {transaction.type === 'credit' ? '+' : '-'}₹{transaction.amount.toLocaleString()}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
