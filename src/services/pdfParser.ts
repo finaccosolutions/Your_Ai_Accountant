@@ -201,22 +201,30 @@ export class PDFParser {
   }
 
   private parseDate(dateStr: string): string {
-    const formats = [
-      /(\d{1,2})[-/](\d{1,2})[-/](\d{4})/,
-      /(\d{1,2})[-/](\d{1,2})[-/](\d{2})/,
-      /(\d{4})[-/](\d{1,2})[-/](\d{1,2})/,
-    ];
+    const cleanDate = dateStr.trim();
 
-    for (const format of formats) {
-      const match = dateStr.match(format);
-      if (match) {
-        if (match[0].startsWith('20') || match[0].startsWith('19')) {
-          return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
-        } else {
-          const year = match[3].length === 2 ? `20${match[3]}` : match[3];
-          return `${year}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`;
-        }
-      }
+    const ddmmyyyy = cleanDate.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    if (ddmmyyyy) {
+      const day = ddmmyyyy[1].padStart(2, '0');
+      const month = ddmmyyyy[2].padStart(2, '0');
+      const year = ddmmyyyy[3];
+      return `${year}-${month}-${day}`;
+    }
+
+    const ddmmyy = cleanDate.match(/(\d{1,2})[-/](\d{1,2})[-/](\d{2})/);
+    if (ddmmyy) {
+      const day = ddmmyy[1].padStart(2, '0');
+      const month = ddmmyy[2].padStart(2, '0');
+      const year = `20${ddmmyy[3]}`;
+      return `${year}-${month}-${day}`;
+    }
+
+    const yyyymmdd = cleanDate.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (yyyymmdd) {
+      const year = yyyymmdd[1];
+      const month = yyyymmdd[2].padStart(2, '0');
+      const day = yyyymmdd[3].padStart(2, '0');
+      return `${year}-${month}-${day}`;
     }
 
     return new Date().toISOString().split('T')[0];

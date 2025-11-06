@@ -1,18 +1,17 @@
 import { ReactNode } from 'react';
-import { Home, Upload, TrendingUp, User, Bell as BellIcon, Calendar, Users } from 'lucide-react';
+import { Home, Receipt, TrendingUp, User, Bell as BellIcon, Users } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
-  activeTab: 'home' | 'daily' | 'upload' | 'shared' | 'insights' | 'reminders' | 'profile';
-  onTabChange: (tab: 'home' | 'daily' | 'upload' | 'shared' | 'insights' | 'reminders' | 'profile') => void;
+  activeTab: 'home' | 'transactions' | 'shared' | 'insights' | 'reminders' | 'profile';
+  onTabChange: (tab: 'home' | 'transactions' | 'shared' | 'insights' | 'reminders' | 'profile') => void;
   unreadNotifications?: number;
 }
 
 export default function Layout({ children, activeTab, onTabChange, unreadNotifications = 0 }: LayoutProps) {
   const tabs = [
     { id: 'home' as const, icon: Home, label: 'Home' },
-    { id: 'daily' as const, icon: Calendar, label: 'Daily' },
-    { id: 'upload' as const, icon: Upload, label: 'Upload' },
+    { id: 'transactions' as const, icon: Receipt, label: 'Txns' },
     { id: 'shared' as const, icon: Users, label: 'Split' },
     { id: 'insights' as const, icon: TrendingUp, label: 'Insights' },
     { id: 'reminders' as const, icon: BellIcon, label: 'Alerts' },

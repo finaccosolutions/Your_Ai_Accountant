@@ -3,22 +3,19 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './components/Auth';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
-import Upload from './components/Upload';
+import Transactions from './components/Transactions';
 import Insights from './components/Insights';
 import Profile from './components/Profile';
 import TransactionApproval from './components/TransactionApproval';
-import CashTransaction from './components/CashTransaction';
 import Reminders from './components/Reminders';
-import DailySummary from './components/DailySummary';
 import SharedExpenses from './components/SharedExpenses';
 import { supabase } from './lib/supabase';
 import { CheckCircle2 } from 'lucide-react';
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const [activeTab, setActiveTab] = useState<'home' | 'daily' | 'upload' | 'shared' | 'insights' | 'reminders' | 'profile'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'transactions' | 'shared' | 'insights' | 'reminders' | 'profile'>('home');
   const [showApproval, setShowApproval] = useState(false);
-  const [showCashTransaction, setShowCashTransaction] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
@@ -89,22 +86,8 @@ function AppContent() {
         </div>
       )}
 
-      {activeTab === 'home' && (
-        <>
-          <Dashboard onAddCashTransaction={() => setShowCashTransaction(true)} />
-          {showCashTransaction && (
-            <CashTransaction
-              onClose={() => setShowCashTransaction(false)}
-              onSuccess={() => {
-                setShowCashTransaction(false);
-                window.location.reload();
-              }}
-            />
-          )}
-        </>
-      )}
-      {activeTab === 'daily' && <DailySummary />}
-      {activeTab === 'upload' && <Upload />}
+      {activeTab === 'home' && <Dashboard />}
+      {activeTab === 'transactions' && <Transactions />}
       {activeTab === 'shared' && <SharedExpenses />}
       {activeTab === 'insights' && <Insights />}
       {activeTab === 'reminders' && <Reminders />}
