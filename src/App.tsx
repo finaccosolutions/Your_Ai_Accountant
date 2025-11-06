@@ -7,13 +7,16 @@ import Upload from './components/Upload';
 import Insights from './components/Insights';
 import Profile from './components/Profile';
 import TransactionApproval from './components/TransactionApproval';
+import CashTransaction from './components/CashTransaction';
+import Reminders from './components/Reminders';
 import { supabase } from './lib/supabase';
 import { CheckCircle2 } from 'lucide-react';
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const [activeTab, setActiveTab] = useState<'home' | 'upload' | 'insights' | 'profile'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'upload' | 'insights' | 'reminders' | 'profile'>('home');
   const [showApproval, setShowApproval] = useState(false);
+  const [showCashTransaction, setShowCashTransaction] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
@@ -84,9 +87,23 @@ function AppContent() {
         </div>
       )}
 
-      {activeTab === 'home' && <Dashboard />}
+      {activeTab === 'home' && (
+        <>
+          <Dashboard onAddCashTransaction={() => setShowCashTransaction(true)} />
+          {showCashTransaction && (
+            <CashTransaction
+              onClose={() => setShowCashTransaction(false)}
+              onSuccess={() => {
+                setShowCashTransaction(false);
+                window.location.reload();
+              }}
+            />
+          )}
+        </>
+      )}
       {activeTab === 'upload' && <Upload />}
       {activeTab === 'insights' && <Insights />}
+      {activeTab === 'reminders' && <Reminders />}
       {activeTab === 'profile' && <Profile />}
     </Layout>
   );

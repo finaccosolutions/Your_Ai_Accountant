@@ -2,9 +2,13 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Transaction, Bank, Category } from '../lib/types';
-import { TrendingUp, TrendingDown, Wallet, Calendar, Filter } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, Calendar, Filter, Plus } from 'lucide-react';
 
-export default function Dashboard() {
+interface DashboardProps {
+  onAddCashTransaction: () => void;
+}
+
+export default function Dashboard({ onAddCashTransaction }: DashboardProps) {
   const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [banks, setBanks] = useState<Bank[]>([]);
@@ -98,6 +102,13 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      <button
+        onClick={onAddCashTransaction}
+        className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white py-4 rounded-2xl font-semibold hover:shadow-lg transform hover:scale-[1.02] transition-all flex items-center justify-center gap-2"
+      >
+        <Plus className="w-5 h-5" />
+        Add Cash Transaction
+      </button>
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
           <div className="flex items-center gap-2 text-green-600 mb-2">

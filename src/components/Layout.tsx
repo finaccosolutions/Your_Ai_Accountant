@@ -1,10 +1,10 @@
 import { ReactNode } from 'react';
-import { Home, Upload, TrendingUp, User, Bell } from 'lucide-react';
+import { Home, Upload, TrendingUp, User, Bell as BellIcon } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
-  activeTab: 'home' | 'upload' | 'insights' | 'profile';
-  onTabChange: (tab: 'home' | 'upload' | 'insights' | 'profile') => void;
+  activeTab: 'home' | 'upload' | 'insights' | 'reminders' | 'profile';
+  onTabChange: (tab: 'home' | 'upload' | 'insights' | 'reminders' | 'profile') => void;
   unreadNotifications?: number;
 }
 
@@ -13,6 +13,7 @@ export default function Layout({ children, activeTab, onTabChange, unreadNotific
     { id: 'home' as const, icon: Home, label: 'Home' },
     { id: 'upload' as const, icon: Upload, label: 'Upload' },
     { id: 'insights' as const, icon: TrendingUp, label: 'Insights' },
+    { id: 'reminders' as const, icon: BellIcon, label: 'Alerts' },
     { id: 'profile' as const, icon: User, label: 'Profile' },
   ];
 
@@ -24,16 +25,6 @@ export default function Layout({ children, activeTab, onTabChange, unreadNotific
             <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               SmartFinance AI
             </h1>
-            <div className="relative">
-              <button className="p-2 hover:bg-gray-100 rounded-full transition-colors">
-                <Bell className="w-6 h-6 text-gray-600" />
-              </button>
-              {unreadNotifications > 0 && (
-                <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
-                  {unreadNotifications}
-                </span>
-              )}
-            </div>
           </div>
         </div>
 
@@ -42,7 +33,7 @@ export default function Layout({ children, activeTab, onTabChange, unreadNotific
         </div>
 
         <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-200/50 z-20">
-          <div className="max-w-lg mx-auto flex items-center justify-around py-2">
+          <div className="max-w-lg mx-auto grid grid-cols-5 gap-1 py-2 px-2">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -51,14 +42,14 @@ export default function Layout({ children, activeTab, onTabChange, unreadNotific
                 <button
                   key={tab.id}
                   onClick={() => onTabChange(tab.id)}
-                  className={`flex flex-col items-center py-2 px-4 rounded-xl transition-all ${
+                  className={`flex flex-col items-center py-2 px-2 rounded-xl transition-all ${
                     isActive
-                      ? 'bg-gradient-to-br from-blue-500 to-purple-500 text-white shadow-lg transform scale-110'
+                      ? 'bg-gradient-to-br from-blue-500 to-emerald-500 text-white shadow-lg'
                       : 'text-gray-600 hover:bg-gray-100'
                   }`}
                 >
-                  <Icon className="w-6 h-6 mb-1" />
-                  <span className="text-xs font-medium">{tab.label}</span>
+                  <Icon className={`${isActive ? 'w-6 h-6' : 'w-5 h-5'} mb-1`} />
+                  <span className="text-[10px] font-medium">{tab.label}</span>
                 </button>
               );
             })}
