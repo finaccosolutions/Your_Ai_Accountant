@@ -15,6 +15,8 @@ export default function CashTransaction({ onClose, onSuccess }: CashTransactionP
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
   const [aiProcessing, setAiProcessing] = useState(false);
+  const [suggestions, setSuggestions] = useState<Array<{description: string; amount: number; category_id: string}>>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const [formData, setFormData] = useState({
     amount: '',
@@ -29,6 +31,15 @@ export default function CashTransaction({ onClose, onSuccess }: CashTransactionP
     loadCategories();
   }, [user]);
 
+  useEffect(() => {
+    if (formData.description.length >= 3) {
+      searchSimilarTransactions(formData.description);
+    } else {
+      setSuggestions([]);
+      setShowSuggestions(false);
+    }
+  }, [formData.description]);
+
   const loadCategories = async () => {
     try {
       const { data } = await supabase
@@ -40,6 +51,48 @@ export default function CashTransaction({ onClose, onSuccess }: CashTransactionP
     } catch (error) {
       console.error('Error loading categories:', error);
     }
+  };
+
+  const searchSimilarTransactions = async (searchTerm: string) => {
+    try {
+      const { data } = await supabase
+        .from('transactions')
+        .select('final_description, ai_description, original_description, amount, category_id')
+        .eq('user_id', user!.id)
+        .eq('is_approved', true)
+        .eq('type', formData.type)
+        .ilike('final_description', `%${searchTerm}%`)
+        .limit(5);
+
+      if (data && data.length > 0) {
+        const unique = data
+          .map(t => ({
+            description: t.final_description || t.ai_description || t.original_description || '',
+            amount: t.amount,
+            category_id: t.category_id || '',
+          }))
+          .filter((v, i, a) => a.findIndex(t => t.description === v.description) === i)
+          .slice(0, 3);
+
+        setSuggestions(unique);
+        setShowSuggestions(true);
+      } else {
+        setSuggestions([]);
+        setShowSuggestions(false);
+      }
+    } catch (error) {
+      console.error('Error searching transactions:', error);
+    }
+  };
+
+  const applySuggestion = (suggestion: {description: string; amount: number; category_id: string}) => {
+    setFormData({
+      ...formData,
+      description: suggestion.description,
+      amount: suggestion.amount.toString(),
+      category_id: suggestion.category_id,
+    });
+    setShowSuggestions(false);
   };
 
   const handleAISuggest = async () => {
@@ -185,7 +238,7 @@ export default function CashTransaction({ onClose, onSuccess }: CashTransactionP
             />
           </div>
 
-          <div>
+          <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Description *
             </label>
@@ -213,6 +266,24 @@ export default function CashTransaction({ onClose, onSuccess }: CashTransactionP
                 </button>
               )}
             </div>
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                <div className="px-3 py-2 bg-gray-50 border-b border-gray-200">
+                  <p className="text-xs font-medium text-gray-600">Similar past transactions:</p>
+                </div>
+                {suggestions.map((suggestion, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => applySuggestion(suggestion)}
+                    className="w-full px-3 py-2 text-left hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0"
+                  >
+                    <p className="text-sm font-medium text-gray-900">{suggestion.description}</p>
+                    <p className="text-xs text-gray-600">₹{suggestion.amount.toLocaleString()}</p>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div>

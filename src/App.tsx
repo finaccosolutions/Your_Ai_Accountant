@@ -9,12 +9,14 @@ import Profile from './components/Profile';
 import TransactionApproval from './components/TransactionApproval';
 import CashTransaction from './components/CashTransaction';
 import Reminders from './components/Reminders';
+import DailySummary from './components/DailySummary';
+import SharedExpenses from './components/SharedExpenses';
 import { supabase } from './lib/supabase';
 import { CheckCircle2 } from 'lucide-react';
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const [activeTab, setActiveTab] = useState<'home' | 'upload' | 'insights' | 'reminders' | 'profile'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'daily' | 'upload' | 'shared' | 'insights' | 'reminders' | 'profile'>('home');
   const [showApproval, setShowApproval] = useState(false);
   const [showCashTransaction, setShowCashTransaction] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -101,7 +103,9 @@ function AppContent() {
           )}
         </>
       )}
+      {activeTab === 'daily' && <DailySummary />}
       {activeTab === 'upload' && <Upload />}
+      {activeTab === 'shared' && <SharedExpenses />}
       {activeTab === 'insights' && <Insights />}
       {activeTab === 'reminders' && <Reminders />}
       {activeTab === 'profile' && <Profile />}

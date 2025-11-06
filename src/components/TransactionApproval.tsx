@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Check, X, Edit2, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,6 +17,10 @@ export default function TransactionApproval({ onComplete }: TransactionApprovalP
   const [isEditing, setIsEditing] = useState(false);
   const [editedDescription, setEditedDescription] = useState('');
   const [editedCategory, setEditedCategory] = useState('');
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const touchStartX = useRef(0);
+  const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (user) {
@@ -165,6 +169,29 @@ export default function TransactionApproval({ onComplete }: TransactionApprovalP
     }
   };
 
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    setIsDragging(true);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging) return;
+    const diff = e.touches[0].clientX - touchStartX.current;
+    setSwipeOffset(diff);
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+
+    if (swipeOffset > 100) {
+      handleApprove();
+    } else if (swipeOffset < -100) {
+      handleReject();
+    }
+
+    setSwipeOffset(0);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -209,10 +236,39 @@ export default function TransactionApproval({ onComplete }: TransactionApprovalP
             style={{ width: `${((currentIndex + 1) / transactions.length) * 100}%` }}
           />
         </div>
+        <p className="text-sm opacity-90 mt-3 text-center">
+          Swipe right to approve, left to reject
+        </p>
       </div>
 
-      <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-6 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
+      <div
+        ref={cardRef}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        className="bg-white/80 backdrop-blur-lg rounded-2xl p-6 shadow-lg relative overflow-hidden"
+        style={{
+          transform: `translateX(${swipeOffset}px)`,
+          transition: isDragging ? 'none' : 'transform 0.3s ease-out',
+        }}
+      >
+        {swipeOffset > 0 && (
+          <div
+            className="absolute inset-0 bg-green-500 flex items-center justify-center"
+            style={{ opacity: Math.min(swipeOffset / 100, 0.5) }}
+          >
+            <Check className="w-16 h-16 text-white" />
+          </div>
+        )}
+        {swipeOffset < 0 && (
+          <div
+            className="absolute inset-0 bg-red-500 flex items-center justify-center"
+            style={{ opacity: Math.min(Math.abs(swipeOffset) / 100, 0.5) }}
+          >
+            <X className="w-16 h-16 text-white" />
+          </div>
+        )}
+        <div className="relative z-10 flex items-center justify-between mb-4">
           <span
             className={`px-4 py-2 rounded-full text-sm font-semibold ${
               currentTransaction.type === 'credit'

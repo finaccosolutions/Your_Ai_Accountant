@@ -204,21 +204,75 @@ export default function Dashboard({ onAddCashTransaction }: DashboardProps) {
 
       {topCategories.length > 0 && (
         <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
-          <h3 className="font-semibold text-gray-900 mb-4">Top Spending Categories</h3>
-          <div className="space-y-3">
-            {topCategories.map(([category, amount]) => {
+          <h3 className="font-semibold text-gray-900 mb-4">Spending by Category</h3>
+
+          <div className="flex items-center justify-center mb-6">
+            <svg viewBox="0 0 200 200" className="w-48 h-48">
+              {topCategories.map(([category, amount], index) => {
+                const total = topCategories.reduce((sum, [, amt]) => sum + amt, 0);
+                const percentage = (amount / total) * 100;
+                const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+                const color = colors[index % colors.length];
+
+                let cumulativePercentage = 0;
+                for (let i = 0; i < index; i++) {
+                  cumulativePercentage += (topCategories[i][1] / total) * 100;
+                }
+
+                const startAngle = (cumulativePercentage / 100) * 360;
+                const endAngle = ((cumulativePercentage + percentage) / 100) * 360;
+
+                const startRad = (startAngle - 90) * (Math.PI / 180);
+                const endRad = (endAngle - 90) * (Math.PI / 180);
+
+                const x1 = 100 + 80 * Math.cos(startRad);
+                const y1 = 100 + 80 * Math.sin(startRad);
+                const x2 = 100 + 80 * Math.cos(endRad);
+                const y2 = 100 + 80 * Math.sin(endRad);
+
+                const largeArc = percentage > 50 ? 1 : 0;
+
+                const pathData = [
+                  `M 100 100`,
+                  `L ${x1} ${y1}`,
+                  `A 80 80 0 ${largeArc} 1 ${x2} ${y2}`,
+                  `Z`
+                ].join(' ');
+
+                return (
+                  <path
+                    key={category}
+                    d={pathData}
+                    fill={color}
+                    opacity="0.9"
+                  />
+                );
+              })}
+              <circle cx="100" cy="100" r="50" fill="white" />
+              <text x="100" y="95" textAnchor="middle" className="text-xs font-bold fill-gray-700">
+                Total
+              </text>
+              <text x="100" y="110" textAnchor="middle" className="text-xs font-semibold fill-gray-900">
+                ₹{totalExpense.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+              </text>
+            </svg>
+          </div>
+
+          <div className="space-y-2">
+            {topCategories.map(([category, amount], index) => {
               const percentage = (amount / totalExpense) * 100;
+              const colors = ['bg-blue-500', 'bg-green-500', 'bg-yellow-500', 'bg-red-500', 'bg-purple-500'];
+              const color = colors[index % colors.length];
+
               return (
-                <div key={category}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium text-gray-700">{category}</span>
-                    <span className="font-semibold text-gray-900">₹{amount.toLocaleString()}</span>
+                <div key={category} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 flex-1">
+                    <div className={`w-3 h-3 rounded-full ${color}`} />
+                    <span className="text-sm font-medium text-gray-700">{category}</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-gradient-to-r from-blue-500 to-purple-500 h-full rounded-full transition-all"
-                      style={{ width: `${percentage}%` }}
-                    />
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500">{percentage.toFixed(1)}%</span>
+                    <span className="text-sm font-semibold text-gray-900">₹{amount.toLocaleString()}</span>
                   </div>
                 </div>
               );
