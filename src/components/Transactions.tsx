@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Upload as UploadIcon, FileText, CheckCircle, AlertCircle, Sparkles, Building, Trash2, Plus, Edit2, ChevronDown, ChevronUp, Save, X, Wallet } from 'lucide-react';
+import { Upload as UploadIcon, FileText, CheckCircle, AlertCircle, Sparkles, Building, Trash2, Plus, Edit2, ChevronDown, ChevronUp, Save, X, Wallet, Eye, Check } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Bank, Category } from '../lib/types';
-import { PDFParser } from '../services/pdfParser';
+import { Bank, Category, Transaction } from '../lib/types';
+import { PDFParser, ParsedTransaction } from '../services/pdfParser';
 import { AIService } from '../services/aiService';
 import CashTransaction from './CashTransaction';
+import TransactionApproval from './TransactionApproval';
 
 export default function Transactions() {
   const { user, profile } = useAuth();
@@ -21,6 +22,12 @@ export default function Transactions() {
   const [showCashTransaction, setShowCashTransaction] = useState(false);
   const [editingBank, setEditingBank] = useState<string | null>(null);
   const [bankListExpanded, setBankListExpanded] = useState(true);
+  const [showReview, setShowReview] = useState(false);
+  const [reviewTransactions, setReviewTransactions] = useState<Array<ParsedTransaction & { aiCategory?: string; aiDescription?: string; confidence?: number }>>([]);
+  const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
+  const [editedTransactions, setEditedTransactions] = useState<Array<{date: string; description: string; amount: number; type: 'debit' | 'credit'; category_id: string}>>([]);
+  const [showPendingApproval, setShowPendingApproval] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
 
   const [newBank, setNewBank] = useState({
     bank_name: '',
@@ -39,8 +46,23 @@ export default function Transactions() {
   useEffect(() => {
     if (user) {
       loadData();
+      checkPendingTransactions();
     }
   }, [user]);
+
+  const checkPendingTransactions = async () => {
+    try {
+      const { count } = await supabase
+        .from('transactions')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user!.id)
+        .eq('is_approved', false);
+
+      setPendingCount(count || 0);
+    } catch (error) {
+      console.error('Error checking pending transactions:', error);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -108,10 +130,52 @@ export default function Transactions() {
       });
 
       setParsedData({ transactions, bankInfo });
+
+      // AI categorization for review
+      if (profile?.gemini_api_key) {
+        const enrichedTransactions = [];
+        const aiService = new AIService(profile.gemini_api_key);
+        const { data: learningPatterns } = await supabase
+          .from('ai_learning_patterns')
+          .select('*')
+          .eq('user_id', user!.id);
+
+        for (const t of transactions) {
+          try {
+            const aiResult = await aiService.categorizeTransaction(
+              t.description,
+              t.amount,
+              t.type,
+              categories,
+              learningPatterns || []
+            );
+            enrichedTransactions.push({
+              ...t,
+              aiCategory: aiResult.categoryId,
+              aiDescription: aiResult.description,
+              confidence: aiResult.confidence,
+            });
+          } catch (error) {
+            enrichedTransactions.push(t);
+          }
+        }
+        setReviewTransactions(enrichedTransactions);
+      } else {
+        setReviewTransactions(transactions);
+      }
+
+      setEditedTransactions(transactions.map(t => ({
+        date: t.date,
+        description: t.description,
+        amount: t.amount,
+        type: t.type,
+        category_id: '',
+      })));
+
       setShowConfirmation(true);
       setStatus({
         type: 'success',
-        message: `Found ${transactions.length} transactions from ${bankInfo.bankName}`,
+        message: `Found ${transactions.length} transactions. Review them before saving.`,
       });
     } catch (error) {
       console.error('Analysis error:', error);
@@ -124,8 +188,26 @@ export default function Transactions() {
     }
   };
 
-  const handleConfirmAndUpload = async () => {
+  const handleStartReview = () => {
+    setShowReview(true);
+    setCurrentReviewIndex(0);
+  };
+
+  const handleUpdateReviewTransaction = (index: number, field: string, value: any) => {
+    const updated = [...editedTransactions];
+    updated[index] = { ...updated[index], [field]: value };
+    setEditedTransactions(updated);
+  };
+
+  const handleSaveAllTransactions = async () => {
     if (!parsedData || !detectedBank) return;
+
+    // Validate all transactions have categories
+    const missingCategories = editedTransactions.filter(t => !t.category_id);
+    if (missingCategories.length > 0) {
+      alert(`Please assign categories to all ${missingCategories.length} transactions before saving.`);
+      return;
+    }
 
     setUploading(true);
 
@@ -161,7 +243,7 @@ export default function Transactions() {
           file_name: file!.name,
           file_type: file!.name.split('.').pop() || 'unknown',
           detected_bank: detectedBank.name,
-          total_transactions: parsedData.transactions.length,
+          total_transactions: editedTransactions.length,
           status: 'processing',
         })
         .select()
@@ -169,44 +251,23 @@ export default function Transactions() {
 
       if (batchError) throw batchError;
 
-      const transactionsToInsert = [];
-
-      for (const t of parsedData.transactions) {
-        let aiResult = null;
-
-        if (profile?.gemini_api_key) {
-          try {
-            const aiService = new AIService(profile.gemini_api_key);
-            const { data: learningPatterns } = await supabase
-              .from('ai_learning_patterns')
-              .select('*')
-              .eq('user_id', user!.id);
-
-            aiResult = await aiService.categorizeTransaction(
-              t.description,
-              t.amount,
-              t.type,
-              categories,
-              learningPatterns || []
-            );
-          } catch (error) {
-            console.log('AI categorization skipped for transaction');
-          }
-        }
-
-        transactionsToInsert.push({
+      const transactionsToInsert = editedTransactions.map((t, idx) => {
+        const original = reviewTransactions[idx];
+        return {
           user_id: user!.id,
           bank_id: bankId,
           transaction_date: t.date,
           amount: t.amount,
           type: t.type,
-          original_description: t.description,
-          ai_description: aiResult?.description || null,
-          ai_category_suggestion: aiResult?.categoryId || null,
-          category_id: aiResult && aiResult.confidence > 0.7 ? aiResult.categoryId : null,
-          is_approved: false,
-        });
-      }
+          original_description: original.description,
+          ai_description: original.aiDescription || null,
+          final_description: t.description,
+          ai_category_suggestion: original.aiCategory || null,
+          category_id: t.category_id,
+          is_approved: true,
+          approved_at: new Date().toISOString(),
+        };
+      });
 
       const { error: transactionsError } = await supabase
         .from('transactions')
@@ -219,15 +280,33 @@ export default function Transactions() {
         .update({ status: 'completed' })
         .eq('id', batch.id);
 
+      // Save learning patterns
+      for (let i = 0; i < editedTransactions.length; i++) {
+        const t = editedTransactions[i];
+        const original = reviewTransactions[i];
+
+        await supabase.from('ai_learning_patterns').upsert({
+          user_id: user!.id,
+          original_description: original.description,
+          category_id: t.category_id,
+          confidence_score: 0.9,
+          usage_count: 1,
+        });
+      }
+
       setStatus({
         type: 'success',
-        message: `Successfully uploaded ${parsedData.transactions.length} transactions! Go to Home to review them.`,
+        message: `Successfully saved ${editedTransactions.length} transactions!`,
       });
 
       setFile(null);
       setShowConfirmation(false);
+      setShowReview(false);
       setDetectedBank(null);
       setParsedData(null);
+      setReviewTransactions([]);
+      setEditedTransactions([]);
+      await checkPendingTransactions();
     } catch (error) {
       console.error('Upload error:', error);
       setStatus({
@@ -301,12 +380,203 @@ export default function Transactions() {
     });
   };
 
+  if (showPendingApproval) {
+    return (
+      <TransactionApproval
+        onComplete={() => {
+          setShowPendingApproval(false);
+          checkPendingTransactions();
+        }}
+      />
+    );
+  }
+
+  if (showReview) {
+    const currentTxn = reviewTransactions[currentReviewIndex];
+    const currentEdit = editedTransactions[currentReviewIndex];
+    const relevantCategories = categories.filter(
+      c => c.type === (currentTxn.type === 'debit' ? 'expense' : 'income')
+    );
+
+    return (
+      <div className="space-y-6">
+        <div className="bg-gradient-to-br from-blue-600 to-cyan-600 rounded-2xl p-6 text-white shadow-xl">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-2xl font-bold">Review Extracted Data</h2>
+            <span className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium">
+              {currentReviewIndex + 1} of {reviewTransactions.length}
+            </span>
+          </div>
+          <div className="w-full bg-white/20 rounded-full h-2 overflow-hidden">
+            <div
+              className="bg-white h-full transition-all duration-300"
+              style={{ width: `${((currentReviewIndex + 1) / reviewTransactions.length) * 100}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-6 shadow-lg">
+          <div className="flex items-center justify-between mb-4">
+            <span className={`px-4 py-2 rounded-full text-sm font-semibold ${
+              currentTxn.type === 'credit'
+                ? 'bg-green-100 text-green-700'
+                : 'bg-red-100 text-red-700'
+            }`}>
+              {currentTxn.type === 'credit' ? 'Income' : 'Expense'}
+            </span>
+            <span className="text-2xl font-bold text-gray-900">
+              ₹{currentEdit.amount.toLocaleString()}
+            </span>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Date</label>
+              <input
+                type="date"
+                value={currentEdit.date}
+                onChange={(e) => handleUpdateReviewTransaction(currentReviewIndex, 'date', e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Amount (₹)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={currentEdit.amount}
+                onChange={(e) => handleUpdateReviewTransaction(currentReviewIndex, 'amount', parseFloat(e.target.value))}
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Description
+                {currentTxn.aiDescription && (
+                  <span className="ml-2 text-purple-600 text-xs inline-flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" />
+                    AI Enhanced
+                  </span>
+                )}
+              </label>
+              <input
+                type="text"
+                value={currentEdit.description}
+                onChange={(e) => handleUpdateReviewTransaction(currentReviewIndex, 'description', e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-xs text-gray-500 mt-1">Original: {currentTxn.description}</p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Category *
+                {currentTxn.aiCategory && currentTxn.confidence && (
+                  <span className="ml-2 text-purple-600 text-xs inline-flex items-center gap-1">
+                    <Sparkles className="w-3 h-3" />
+                    AI Suggested ({Math.round(currentTxn.confidence * 100)}% confidence)
+                  </span>
+                )}
+              </label>
+              <select
+                value={currentEdit.category_id}
+                onChange={(e) => handleUpdateReviewTransaction(currentReviewIndex, 'category_id', e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select category</option>
+                {relevantCategories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <button
+            onClick={() => setCurrentReviewIndex(Math.max(0, currentReviewIndex - 1))}
+            disabled={currentReviewIndex === 0}
+            className="py-3 rounded-xl font-semibold text-gray-700 bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            Previous
+          </button>
+
+          {currentReviewIndex === reviewTransactions.length - 1 ? (
+            <button
+              onClick={handleSaveAllTransactions}
+              disabled={uploading}
+              className="col-span-2 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-green-500 to-emerald-600 hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {uploading ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="w-5 h-5" />
+                  Save All ({reviewTransactions.length})
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              onClick={() => setCurrentReviewIndex(Math.min(reviewTransactions.length - 1, currentReviewIndex + 1))}
+              className="col-span-2 py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-blue-600 to-cyan-600 hover:shadow-lg transition-all"
+            >
+              Next
+            </button>
+          )}
+        </div>
+
+        <button
+          onClick={() => {
+            if (confirm('Cancel review? All changes will be lost.')) {
+              setShowReview(false);
+              setShowConfirmation(false);
+              setReviewTransactions([]);
+              setEditedTransactions([]);
+            }
+          }}
+          className="w-full py-3 rounded-xl font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+        >
+          Cancel Review
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-br from-blue-600 to-cyan-600 rounded-2xl p-6 text-white shadow-xl">
         <h2 className="text-2xl font-bold mb-2">Transactions</h2>
         <p className="text-sm opacity-90">Upload bank statements or add cash transactions</p>
       </div>
+
+      {pendingCount > 0 && (
+        <div
+          onClick={() => setShowPendingApproval(true)}
+          className="bg-gradient-to-br from-orange-500 to-red-500 rounded-2xl p-6 text-white shadow-xl cursor-pointer transform hover:scale-[1.02] transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xl font-bold mb-1">Review Pending Transactions</h3>
+              <p className="text-sm opacity-90">
+                {pendingCount} transaction{pendingCount !== 1 ? 's' : ''} waiting for approval
+              </p>
+            </div>
+            <div className="bg-white/20 rounded-full p-3">
+              <CheckCircle className="w-8 h-8" />
+            </div>
+          </div>
+        </div>
+      )}
 
       <button
         onClick={() => setShowCashTransaction(true)}
@@ -558,21 +828,12 @@ export default function Transactions() {
             </div>
           </div>
           <button
-            onClick={handleConfirmAndUpload}
+            onClick={handleStartReview}
             disabled={uploading}
-            className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white py-4 rounded-xl font-semibold hover:shadow-lg transform hover:scale-[1.02] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white py-4 rounded-xl font-semibold hover:shadow-lg transform hover:scale-[1.02] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {uploading ? (
-              <>
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                Processing...
-              </>
-            ) : (
-              <>
-                <CheckCircle className="w-5 h-5" />
-                Confirm & Upload
-              </>
-            )}
+            <Eye className="w-5 h-5" />
+            Review {parsedData?.transactions.length} Transactions
           </button>
         </div>
       )}
