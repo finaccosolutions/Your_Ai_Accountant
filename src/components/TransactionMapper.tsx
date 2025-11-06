@@ -21,6 +21,7 @@ export default function TransactionMapper({ onClose }: TransactionMapperProps) {
     name: '',
     type: 'expense' as 'income' | 'expense',
   });
+  const [isBulkSaving, setIsBulkSaving] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -75,6 +76,8 @@ export default function TransactionMapper({ onClose }: TransactionMapperProps) {
           final_description: editedDescription,
           category_id: editedCategory,
           mapping_status: 'mapped',
+          is_approved: true,
+          approved_at: new Date().toISOString(),
         })
         .eq('id', currentTransaction.id);
 
@@ -95,6 +98,57 @@ export default function TransactionMapper({ onClose }: TransactionMapperProps) {
     } catch (error) {
       console.error('Error saving transaction:', error);
       alert('Failed to save transaction');
+    }
+  };
+
+  const handleConfirmAllWithAI = async () => {
+    if (!confirm(`This will approve all ${transactions.length} transactions with their AI-suggested values. Continue?`)) {
+      return;
+    }
+
+    setIsBulkSaving(true);
+    try {
+      const updates = transactions.map(t => ({
+        id: t.id,
+        final_description: t.ai_description || t.original_description,
+        category_id: t.ai_category_suggestion,
+        mapping_status: 'mapped',
+        is_approved: true,
+        approved_at: new Date().toISOString(),
+      }));
+
+      const validUpdates = updates.filter(u => u.category_id);
+      const invalidCount = updates.length - validUpdates.length;
+
+      if (invalidCount > 0) {
+        alert(`${invalidCount} transactions don't have AI category suggestions and will be skipped. You can map them manually later.`);
+      }
+
+      if (validUpdates.length === 0) {
+        alert('No transactions have AI category suggestions. Please map them manually.');
+        return;
+      }
+
+      for (const update of validUpdates) {
+        await supabase
+          .from('transactions')
+          .update({
+            final_description: update.final_description,
+            category_id: update.category_id,
+            mapping_status: update.mapping_status,
+            is_approved: update.is_approved,
+            approved_at: update.approved_at,
+          })
+          .eq('id', update.id);
+      }
+
+      alert(`Successfully approved ${validUpdates.length} transactions with AI suggestions!`);
+      onClose();
+    } catch (error) {
+      console.error('Error bulk saving:', error);
+      alert('Failed to save all transactions');
+    } finally {
+      setIsBulkSaving(false);
     }
   };
 
@@ -322,6 +376,24 @@ export default function TransactionMapper({ onClose }: TransactionMapperProps) {
         </div>
       </div>
 
+      <button
+        onClick={handleConfirmAllWithAI}
+        disabled={isBulkSaving || !transactions.some(t => t.ai_category_suggestion)}
+        className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 text-white py-4 rounded-xl font-semibold hover:shadow-lg transform hover:scale-[1.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+      >
+        {isBulkSaving ? (
+          <>
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+            Saving All Transactions...
+          </>
+        ) : (
+          <>
+            <Sparkles className="w-5 h-5" />
+            Confirm All with AI Suggestions ({transactions.filter(t => t.ai_category_suggestion).length}/{transactions.length})
+          </>
+        )}
+      </button>
+
       <div className="grid grid-cols-2 gap-3">
         <button
           onClick={handleSkip}
@@ -367,13 +439,13 @@ export default function TransactionMapper({ onClose }: TransactionMapperProps) {
       </button>
 
       <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
-        <h4 className="font-semibold text-green-900 mb-2">Incremental Mapping:</h4>
+        <h4 className="font-semibold text-green-900 mb-2">Maximum Automation Options:</h4>
         <ul className="space-y-1 text-sm text-green-800">
-          <li>• Map transactions at your own pace</li>
+          <li>• <strong>Confirm All:</strong> Approve all transactions with AI suggestions in one click</li>
+          <li>• <strong>Save & Next:</strong> Review and confirm transactions one by one</li>
+          <li>• <strong>Skip:</strong> Skip transactions without AI suggestions to map later</li>
           <li>• Your progress is automatically saved</li>
-          <li>• Come back anytime to map more</li>
-          <li>• Add new categories on the fly</li>
-          <li>• AI learns from your choices</li>
+          <li>• AI learns from your choices and improves over time</li>
         </ul>
       </div>
     </div>

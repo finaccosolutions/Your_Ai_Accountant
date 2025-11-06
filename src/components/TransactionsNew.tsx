@@ -221,11 +221,15 @@ export default function TransactionsNew() {
 
       setStatus({
         type: 'success',
-        message: `Successfully extracted ${transactions.length} transactions from ${bankInfo.bankName}! Click "Map Transactions" to categorize them.`,
+        message: `Successfully extracted ${transactions.length} transactions from ${bankInfo.bankName}! Opening mapper to review...`,
       });
 
       setFile(null);
       await checkUnmappedTransactions();
+
+      setTimeout(() => {
+        setShowMapper(true);
+      }, 1500);
     } catch (error) {
       console.error('Upload error:', error);
       setStatus({
