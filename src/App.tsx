@@ -3,15 +3,16 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Auth from './components/Auth';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
-import Transactions from './components/Transactions';
+import TransactionsNew from './components/TransactionsNew';
 import Insights from './components/Insights';
 import Profile from './components/Profile';
 import Reminders from './components/Reminders';
 import SharedExpenses from './components/SharedExpenses';
+import Reports from './components/Reports';
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const [activeTab, setActiveTab] = useState<'home' | 'transactions' | 'shared' | 'insights' | 'reminders' | 'profile'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'transactions' | 'shared' | 'insights' | 'reminders' | 'reports' | 'profile'>('home');
 
   if (loading) {
     return (
@@ -28,10 +29,11 @@ function AppContent() {
   return (
     <Layout activeTab={activeTab} onTabChange={setActiveTab}>
       {activeTab === 'home' && <Dashboard />}
-      {activeTab === 'transactions' && <Transactions />}
+      {activeTab === 'transactions' && <TransactionsNew />}
       {activeTab === 'shared' && <SharedExpenses />}
       {activeTab === 'insights' && <Insights />}
       {activeTab === 'reminders' && <Reminders />}
+      {activeTab === 'reports' && <Reports />}
       {activeTab === 'profile' && <Profile />}
     </Layout>
   );

@@ -1,10 +1,10 @@
 import { ReactNode } from 'react';
-import { Home, Receipt, TrendingUp, User, Bell, Users } from 'lucide-react';
+import { Home, Receipt, TrendingUp, User, Bell, Users, FileText } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
-  activeTab: 'home' | 'transactions' | 'shared' | 'insights' | 'reminders' | 'profile';
-  onTabChange: (tab: 'home' | 'transactions' | 'shared' | 'insights' | 'reminders' | 'profile') => void;
+  activeTab: 'home' | 'transactions' | 'shared' | 'insights' | 'reminders' | 'reports' | 'profile';
+  onTabChange: (tab: 'home' | 'transactions' | 'shared' | 'insights' | 'reminders' | 'reports' | 'profile') => void;
   unreadNotifications?: number;
 }
 
@@ -15,6 +15,7 @@ export default function Layout({ children, activeTab, onTabChange }: LayoutProps
     { id: 'shared' as const, icon: Users, label: 'Split' },
     { id: 'insights' as const, icon: TrendingUp, label: 'Insights' },
     { id: 'reminders' as const, icon: Bell, label: 'Alerts' },
+    { id: 'reports' as const, icon: FileText, label: 'Reports' },
     { id: 'profile' as const, icon: User, label: 'Profile' },
   ];
 
@@ -35,7 +36,7 @@ export default function Layout({ children, activeTab, onTabChange }: LayoutProps
 
         <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-gray-200/50 z-20 safe-area-bottom">
           <div className="max-w-lg mx-auto">
-            <div className="flex justify-between items-center px-4 py-2">
+            <div className="flex overflow-x-auto items-center px-4 py-2 gap-2 scrollbar-hide">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;

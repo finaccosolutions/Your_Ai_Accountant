@@ -144,6 +144,7 @@ export default function CashTransaction({ onClose, onSuccess }: CashTransactionP
       const { error } = await supabase.from('transactions').insert({
         user_id: user!.id,
         bank_id: null,
+        batch_id: null,
         category_id: formData.category_id,
         transaction_date: formData.transaction_date,
         amount: parseFloat(formData.amount),
@@ -151,6 +152,7 @@ export default function CashTransaction({ onClose, onSuccess }: CashTransactionP
         original_description: formData.description,
         final_description: formData.description,
         notes: formData.notes,
+        mapping_status: 'approved',
         is_approved: true,
         approved_at: new Date().toISOString(),
       });
@@ -208,7 +210,7 @@ export default function CashTransaction({ onClose, onSuccess }: CashTransactionP
                   : 'bg-gray-100 text-gray-700'
               }`}
             >
-              Expense
+              Withdrawal
             </button>
             <button
               type="button"
@@ -219,7 +221,7 @@ export default function CashTransaction({ onClose, onSuccess }: CashTransactionP
                   : 'bg-gray-100 text-gray-700'
               }`}
             >
-              Income
+              Deposit
             </button>
           </div>
 
