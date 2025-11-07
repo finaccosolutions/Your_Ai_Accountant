@@ -18,6 +18,13 @@ export interface BankDetectionResult {
   confidence: number;
 }
 
+interface TextItem {
+  str: string;
+  x: number;
+  y: number;
+  width: number;
+}
+
 const BANK_PATTERNS = {
   'Federal Bank': {
     keywords: ['federal', 'federal bank', 'federalbank'],
@@ -79,32 +86,41 @@ export class PDFParser {
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
     let fullText = '';
-    const textByPage: string[] = [];
 
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
 
       const items = textContent.items as any[];
-      const pageLines: Map<number, string[]> = new Map();
+      const pageLines: Map<number, TextItem[]> = new Map();
 
       items.forEach((item) => {
         if (item.str.trim()) {
           const y = Math.round(item.transform[5]);
+          const x = Math.round(item.transform[4]);
+
           if (!pageLines.has(y)) {
             pageLines.set(y, []);
           }
-          pageLines.get(y)!.push(item.str);
+
+          pageLines.get(y)!.push({
+            str: item.str,
+            x: x,
+            y: y,
+            width: item.width || 0
+          });
         }
       });
 
       const sortedLines = Array.from(pageLines.entries())
         .sort((a, b) => b[0] - a[0])
-        .map(([_, items]) => items.join(' ').trim())
+        .map(([_, items]) => {
+          const sortedItems = items.sort((a, b) => a.x - b.x);
+          return sortedItems.map(item => item.str).join(' ').trim();
+        })
         .filter(line => line.length > 0);
 
       const pageText = sortedLines.join('\n');
-      textByPage.push(pageText);
       fullText += pageText + '\n';
     }
 
@@ -274,17 +290,29 @@ export class PDFParser {
 
     let headerEndIndex = 0;
     let foundHeader = false;
-    for (let i = 0; i < Math.min(20, lines.length); i++) {
+    let debitColKeywords: string[] = [];
+    let creditColKeywords: string[] = [];
+
+    for (let i = 0; i < Math.min(30, lines.length); i++) {
       const line = lines[i].toLowerCase();
-      if (
-        (line.includes('date') && (line.includes('debit') || line.includes('credit') || line.includes('amount') || line.includes('withdrawal') || line.includes('deposit'))) ||
-        (line.includes('transaction') && line.includes('date')) ||
-        (line.includes('particulars') && line.includes('amount')) ||
-        (line.includes('narration') && line.includes('date')) ||
-        (line.includes('txn') && line.includes('date'))
-      ) {
+
+      if (line.includes('date') &&
+          (line.includes('debit') || line.includes('credit') ||
+           line.includes('withdrawal') || line.includes('deposit') ||
+           line.includes('amount') || line.includes('particulars') ||
+           line.includes('narration'))) {
+
         headerEndIndex = i + 1;
         foundHeader = true;
+
+        if (line.includes('withdrawal') || line.match(/\bdr\b/) || line.includes('debit')) {
+          debitColKeywords.push('withdrawal', 'dr', 'debit');
+        }
+        if (line.includes('deposit') || line.match(/\bcr\b/) || line.includes('credit')) {
+          creditColKeywords.push('deposit', 'cr', 'credit');
+        }
+
+        break;
       }
     }
 
@@ -292,9 +320,13 @@ export class PDFParser {
 
     const datePattern = /\b(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}|\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}|\d{2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4})\b/;
 
-    for (let i = 0; i < dataLines.length; i++) {
+    let i = 0;
+    while (i < dataLines.length) {
       const line = dataLines[i];
-      if (!line.trim() || line.trim().length < 8) continue;
+      if (!line.trim() || line.trim().length < 8) {
+        i++;
+        continue;
+      }
 
       const lineLower = line.toLowerCase();
 
@@ -307,19 +339,60 @@ export class PDFParser {
         lineLower.includes('balance c/f') ||
         lineLower.includes('grand total') ||
         lineLower.includes('statement period') ||
-        lineLower.includes('page ') ||
-        lineLower.includes('continued')
+        lineLower.includes('statement summary') ||
+        lineLower.match(/^page\s+\d+/) ||
+        lineLower.includes('continued on next page') ||
+        lineLower.includes('continued from previous')
       ) {
+        i++;
         continue;
       }
 
       const dateMatch = line.match(datePattern);
-      if (!dateMatch) continue;
+      if (!dateMatch) {
+        i++;
+        continue;
+      }
+
+      const date = this.parseDate(dateMatch[0]);
+      const warnings: string[] = [];
+
+      let description = '';
+      let descriptionLines: string[] = [];
+
+      let currentLine = line;
+      descriptionLines.push(currentLine);
+
+      for (let j = i + 1; j < Math.min(i + 5, dataLines.length); j++) {
+        const nextLine = dataLines[j];
+        const nextLineLower = nextLine.toLowerCase();
+
+        if (nextLine.match(datePattern)) {
+          break;
+        }
+
+        if (nextLineLower.includes('opening balance') ||
+            nextLineLower.includes('closing balance') ||
+            nextLineLower.includes('total debit') ||
+            nextLineLower.includes('total credit')) {
+          break;
+        }
+
+        const hasAmount = /\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/.test(nextLine);
+        if (!hasAmount && nextLine.trim().length > 0 && nextLine.trim().length < 100) {
+          descriptionLines.push(nextLine);
+        } else {
+          break;
+        }
+      }
+
+      const fullText = descriptionLines.join(' ');
 
       const amounts: number[] = [];
       let match;
-      const tempAmountPattern = /(?:^|\s|\t)(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+\.\d{1,2}|\d{4,})(?:\s|$|\t)/g;
-      while ((match = tempAmountPattern.exec(line)) !== null) {
+      const amountPattern = /(?:^|\s)(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+\.\d{1,2}|\d{4,})(?:\s|$)/g;
+
+      while ((match = amountPattern.exec(fullText)) !== null) {
         const cleanAmount = match[1].replace(/,/g, '');
         const amt = parseFloat(cleanAmount);
         if (amt > 0.01 && amt < 100000000) {
@@ -327,113 +400,133 @@ export class PDFParser {
         }
       }
 
-      if (amounts.length === 0) continue;
+      if (amounts.length === 0) {
+        i++;
+        continue;
+      }
 
-      const date = this.parseDate(dateMatch[0]);
-      const warnings: string[] = [];
-
-      let description = line
+      description = fullText
         .replace(datePattern, '')
         .replace(/\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/g, '')
         .replace(/\s+/g, ' ')
-        .replace(/[^\w\s\-\/]/g, '')
         .trim();
 
-      const descLower = description.toLowerCase();
-      if (descLower.includes('dr') || descLower.includes('cr')) {
-        description = description.replace(/\b(dr|cr|DR|CR)\b/gi, '').trim();
+      description = description
+        .replace(/\b(dr|cr|DR|CR)\b/gi, '')
+        .replace(/[^\w\s\-\/.,()]/g, '')
+        .trim();
+
+      if (description.length > 200) {
+        description = description.substring(0, 200).trim();
       }
 
       if (description.length < 3) {
-        for (let j = i + 1; j < Math.min(i + 3, dataLines.length); j++) {
-          const nextLine = dataLines[j];
-          if (!nextLine.match(datePattern) && nextLine.trim().length > 0) {
-            const nextDesc = nextLine.replace(/\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/g, '').trim();
-            if (nextDesc.length > 0) {
-              description += ' ' + nextDesc;
-              if (description.length >= 10) break;
-            }
-          } else {
-            break;
-          }
-        }
+        i++;
+        continue;
       }
-
-      if (description.length > 150) {
-        description = description.substring(0, 150);
-      }
-
-      description = description.trim();
-      if (description.length < 2) continue;
 
       let amount = 0;
       let type: 'debit' | 'credit' = 'debit';
-      let confidence = 0.8;
+      let confidence = 0.7;
 
       const hasCreditMarker =
-        /\bcr\b/i.test(line) ||
+        /\bCR\b/i.test(fullText) ||
         lineLower.includes('credit') ||
         lineLower.includes('deposit') ||
         lineLower.includes('received') ||
         lineLower.includes('salary') ||
-        lineLower.includes('refund');
+        lineLower.includes('refund') ||
+        lineLower.includes('interest credited');
 
       const hasDebitMarker =
-        /\bdr\b/i.test(line) ||
+        /\bDR\b/i.test(fullText) ||
         lineLower.includes('debit') ||
         lineLower.includes('withdrawal') ||
         lineLower.includes('withdraw') ||
         lineLower.includes('payment') ||
-        lineLower.includes('purchase');
-
-      if (hasCreditMarker && !hasDebitMarker) {
-        type = 'credit';
-        confidence = 0.9;
-      } else if (hasDebitMarker && !hasCreditMarker) {
-        type = 'debit';
-        confidence = 0.9;
-      } else {
-        warnings.push('Transaction type unclear - please verify');
-        confidence = 0.6;
-      }
+        lineLower.includes('purchase') ||
+        lineLower.includes('transfer to') ||
+        lineLower.includes('paid to');
 
       if (amounts.length === 1) {
         amount = amounts[0];
+
+        if (hasCreditMarker && !hasDebitMarker) {
+          type = 'credit';
+          confidence = 0.95;
+        } else if (hasDebitMarker && !hasCreditMarker) {
+          type = 'debit';
+          confidence = 0.95;
+        } else {
+          type = 'debit';
+          confidence = 0.6;
+          warnings.push('Transaction type unclear - defaulted to debit');
+        }
+
       } else if (amounts.length === 2) {
         if (hasCreditMarker && !hasDebitMarker) {
+          type = 'credit';
           amount = amounts[0];
+          confidence = 0.85;
         } else if (hasDebitMarker && !hasCreditMarker) {
+          type = 'debit';
           amount = amounts[0];
+          confidence = 0.85;
         } else {
-          amount = amounts[0];
+          const debitColIndex = fullText.toLowerCase().indexOf('debit');
+          const creditColIndex = fullText.toLowerCase().indexOf('credit');
+          const withdrawalIndex = fullText.toLowerCase().indexOf('withdrawal');
+          const depositIndex = fullText.toLowerCase().indexOf('deposit');
+
+          if ((debitColIndex !== -1 || withdrawalIndex !== -1) &&
+              (creditColIndex === -1 && depositIndex === -1)) {
+            type = 'debit';
+            amount = amounts[0];
+            confidence = 0.75;
+          } else if ((creditColIndex !== -1 || depositIndex !== -1) &&
+                     (debitColIndex === -1 && withdrawalIndex === -1)) {
+            type = 'credit';
+            amount = amounts[0];
+            confidence = 0.75;
+          } else {
+            amount = amounts[0];
+            type = 'debit';
+            confidence = 0.6;
+            warnings.push('Multiple amounts - using first as transaction amount');
+          }
         }
-        confidence = Math.min(confidence, 0.85);
-      } else if (amounts.length === 3) {
+
+      } else if (amounts.length >= 3) {
         if (hasCreditMarker && !hasDebitMarker) {
+          type = 'credit';
           amount = amounts[0];
+          confidence = 0.75;
         } else if (hasDebitMarker && !hasCreditMarker) {
+          type = 'debit';
           amount = amounts[0];
+          confidence = 0.75;
         } else {
+          const sortedAmounts = [...amounts].sort((a, b) => b - a);
           amount = amounts[0];
+          type = 'debit';
+          confidence = 0.5;
+          warnings.push('Multiple amounts detected - verify transaction amount and type');
         }
-        confidence = Math.min(confidence, 0.75);
-      } else if (amounts.length >= 4) {
-        const sortedAmounts = [...amounts].sort((a, b) => b - a);
-        amount = sortedAmounts[1] || amounts[0];
-        confidence = Math.min(confidence, 0.65);
-        warnings.push('Multiple amounts detected - using most likely transaction amount');
       }
 
-      if (amount <= 0 || isNaN(amount)) continue;
+      if (amount <= 0 || isNaN(amount)) {
+        i++;
+        continue;
+      }
 
       const parsedDate = new Date(date);
       const now = new Date();
-      const twoYearsAgo = new Date(now.getFullYear() - 2, 0, 1);
+      const threeYearsAgo = new Date(now.getFullYear() - 3, 0, 1);
       const oneYearFuture = new Date(now.getFullYear() + 1, 11, 31);
 
-      if (parsedDate < twoYearsAgo || parsedDate > oneYearFuture) {
+      if (parsedDate < threeYearsAgo || parsedDate > oneYearFuture) {
         warnings.push('Date seems unusual - please verify');
-        confidence = Math.min(confidence, 0.6);
+        confidence = Math.min(confidence, 0.5);
       }
 
       transactions.push({
@@ -444,6 +537,8 @@ export class PDFParser {
         confidence,
         warnings: warnings.length > 0 ? warnings : undefined
       });
+
+      i++;
     }
 
     return transactions;

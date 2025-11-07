@@ -45,10 +45,9 @@ ${learningPatterns && learningPatterns.length > 0 ? `User's Past Patterns:
 ${learningPatterns.map(p => `- "${p.description}" → Category ID: ${p.categoryId} (Confidence: ${p.confidence})`).join('\n')}
 ` : ''}
 
-Respond in JSON format:
+Respond in JSON format with ONLY the category ID and confidence. Do NOT modify or rewrite the description:
 {
   "categoryId": "category_id_from_list",
-  "description": "clear, concise description of what this transaction is for",
   "confidence": 0.85
 }`;
 
@@ -88,7 +87,7 @@ Respond in JSON format:
 
       return {
         categoryId: result.categoryId,
-        description: result.description || description,
+        description: description,
         confidence: result.confidence || 0.7,
       };
     } catch (error) {

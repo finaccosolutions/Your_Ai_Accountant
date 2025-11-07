@@ -211,7 +211,7 @@ export default function TransactionsNew() {
           amount: t.amount,
           type: t.type,
           original_description: t.description,
-          ai_description: aiResult?.description || null,
+          ai_description: t.description,
           ai_category_suggestion: aiResult?.categoryId || null,
           category_id: null,
           mapping_status: 'unmapped',
