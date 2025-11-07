@@ -325,9 +325,29 @@ export default function TransactionsNew() {
         batchId={currentBatchId || ''}
         onConfirm={async (bankId) => {
           setShowBankConfirmation(false);
+
+          // Wait a moment for database to propagate the bank_id updates
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          // Reload data to ensure we have the latest
           await loadData();
           await checkUnmappedTransactions();
-          setShowMapper(true);
+
+          // Verify transactions have bank_id before showing mapper
+          const { count } = await supabase
+            .from('transactions')
+            .select('*', { count: 'exact', head: true })
+            .eq('batch_id', currentBatchId || '')
+            .not('bank_id', 'is', null);
+
+          if (count && count > 0) {
+            setShowMapper(true);
+          } else {
+            // If still no transactions with bank_id, wait a bit more and try again
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await checkUnmappedTransactions();
+            setShowMapper(true);
+          }
         }}
         onCancel={() => {
           setShowBankConfirmation(false);
