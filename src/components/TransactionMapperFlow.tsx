@@ -37,7 +37,6 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
         .select('*, category:categories(*), bank:banks(*)')
         .eq('user_id', user!.id)
         .eq('mapping_status', 'unmapped')
-        .not('bank_id', 'is', null)
         .order('transaction_date', { ascending: false });
 
       if (batchId) {
@@ -49,7 +48,10 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
         supabase.from('categories').select('*').or(`user_id.eq.${user!.id},is_system.eq.true`).order('name'),
       ]);
 
-      if (transactionsResult.data) setTransactions(transactionsResult.data);
+      if (transactionsResult.data) {
+        console.log('Loaded transactions:', transactionsResult.data.length);
+        setTransactions(transactionsResult.data);
+      }
       if (categoriesResult.data) setCategories(categoriesResult.data);
     } catch (error) {
       console.error('Error loading transactions:', error);
@@ -89,7 +91,6 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
         })
         .eq('id', currentTransaction.id);
 
-      // Check if learning pattern exists
       const { data: existingPattern } = await supabase
         .from('ai_learning_patterns')
         .select('*')
@@ -98,7 +99,6 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
         .maybeSingle();
 
       if (existingPattern) {
-        // Update existing pattern
         await supabase
           .from('ai_learning_patterns')
           .update({
@@ -109,7 +109,6 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
           })
           .eq('id', existingPattern.id);
       } else {
-        // Insert new pattern
         await supabase.from('ai_learning_patterns').insert({
           user_id: user!.id,
           original_description: currentTransaction.original_description || editedDescription,

@@ -75,8 +75,7 @@ export default function TransactionsNew() {
           .from('transactions')
           .select('*', { count: 'exact', head: true })
           .eq('user_id', user!.id)
-          .eq('mapping_status', 'unmapped')
-          .not('bank_id', 'is', null),
+          .eq('mapping_status', 'unmapped'),
         supabase
           .from('transactions')
           .select('*', { count: 'exact', head: true })
