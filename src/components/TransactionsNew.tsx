@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { Upload as UploadIcon, FileText, CheckCircle, AlertCircle, Sparkles, Building, Trash2, Plus, Edit2, ChevronDown, ChevronUp, Save, X, Wallet, List } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Bank, Category } from '../lib/types';
+import { Bank, Category, UploadBatch } from '../lib/types';
 import { PDFParser } from '../services/pdfParser';
 import { AIService } from '../services/aiService';
 import CashTransaction from './CashTransaction';
-import TransactionMapper from './TransactionMapper';
+import TransactionMapperFlow from './TransactionMapperFlow';
+import BankConfirmation from './BankConfirmation';
 
 export default function TransactionsNew() {
   const { user, profile } = useAuth();
@@ -35,13 +36,33 @@ export default function TransactionsNew() {
     account_type: 'savings',
     balance: 0,
   });
+  const [showBankConfirmation, setShowBankConfirmation] = useState(false);
+  const [bankToConfirm, setBankToConfirm] = useState<Bank | null>(null);
+  const [transactionCountToConfirm, setTransactionCountToConfirm] = useState(0);
+  const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
+  const [uploadBatches, setUploadBatches] = useState<UploadBatch[]>([]);
 
   useEffect(() => {
     if (user) {
       loadData();
       checkUnmappedTransactions();
+      loadUploadBatches();
     }
   }, [user]);
+
+  const loadUploadBatches = async () => {
+    try {
+      const { data } = await supabase
+        .from('upload_batches')
+        .select('*')
+        .eq('user_id', user!.id)
+        .order('created_at', { ascending: false });
+
+      if (data) setUploadBatches(data);
+    } catch (error) {
+      console.error('Error loading upload batches:', error);
+    }
+  };
 
   const checkUnmappedTransactions = async () => {
     try {
@@ -126,12 +147,14 @@ export default function TransactionsNew() {
       }
 
 
-      let bankId = banks.find(
+      let existingBank = banks.find(
         b => b.bank_name.toLowerCase() === bankInfo.bankName.toLowerCase() &&
              b.account_number.includes(bankInfo.accountNumber)
-      )?.id;
+      );
 
-      if (!bankId) {
+      let bankId: string;
+
+      if (!existingBank) {
         const { data: newBankData, error: bankError } = await supabase
           .from('banks')
           .insert({
@@ -147,6 +170,9 @@ export default function TransactionsNew() {
         if (bankError) throw bankError;
         bankId = newBankData.id;
         await loadData();
+        existingBank = newBankData;
+      } else {
+        bankId = existingBank.id;
       }
 
       const { data: batch, error: batchError } = await supabase
@@ -221,15 +247,18 @@ export default function TransactionsNew() {
 
       setStatus({
         type: 'success',
-        message: `Successfully extracted ${transactions.length} transactions from ${bankInfo.bankName}! Opening mapper to review...`,
+        message: `Successfully extracted ${transactions.length} transactions! Confirming bank details...`,
       });
 
       setFile(null);
-      await checkUnmappedTransactions();
+      await loadUploadBatches();
 
-      setTimeout(() => {
-        setShowMapper(true);
-      }, 1500);
+      if (existingBank) {
+        setBankToConfirm(existingBank);
+        setTransactionCountToConfirm(transactions.length);
+        setCurrentBatchId(batch.id);
+        setShowBankConfirmation(true);
+      }
     } catch (error) {
       console.error('Upload error:', error);
       setStatus({
@@ -303,12 +332,37 @@ export default function TransactionsNew() {
     });
   };
 
+  if (showBankConfirmation && bankToConfirm) {
+    return (
+      <BankConfirmation
+        bank={bankToConfirm}
+        transactionCount={transactionCountToConfirm}
+        batchId={currentBatchId || ''}
+        onConfirm={(bankId) => {
+          setShowBankConfirmation(false);
+          setCurrentBatchId(null);
+          setTimeout(() => {
+            setShowMapper(true);
+          }, 500);
+        }}
+        onCancel={() => {
+          setShowBankConfirmation(false);
+          setStatus(null);
+          checkUnmappedTransactions();
+        }}
+      />
+    );
+  }
+
   if (showMapper) {
     return (
-      <TransactionMapper
+      <TransactionMapperFlow
+        batchId={currentBatchId || undefined}
         onClose={() => {
           setShowMapper(false);
+          setCurrentBatchId(null);
           checkUnmappedTransactions();
+          loadUploadBatches();
         }}
       />
     );
@@ -585,6 +639,54 @@ export default function TransactionsNew() {
           </div>
         </div>
       )}
+
+      <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
+        <h3 className="font-semibold text-gray-900 mb-4">Upload History & Management</h3>
+        {uploadBatches.length === 0 ? (
+          <p className="text-gray-500 text-center py-4">No files uploaded yet</p>
+        ) : (
+          <div className="space-y-2">
+            {uploadBatches.map((batch) => (
+              <div key={batch.id} className="p-3 bg-gray-50 rounded-xl flex items-center justify-between">
+                <div className="flex-1">
+                  <p className="font-medium text-gray-900">{batch.file_name}</p>
+                  <p className="text-sm text-gray-600">
+                    {batch.total_transactions} transactions • {batch.detected_bank}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {new Date(batch.created_at).toLocaleDateString()} {new Date(batch.created_at).toLocaleTimeString()}
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Delete this batch and all its ${batch.total_transactions} transactions? This cannot be undone.`)) return;
+                    try {
+                      await supabase
+                        .from('transactions')
+                        .delete()
+                        .eq('batch_id', batch.id);
+
+                      await supabase
+                        .from('upload_batches')
+                        .delete()
+                        .eq('id', batch.id);
+
+                      await loadUploadBatches();
+                      await checkUnmappedTransactions();
+                    } catch (error) {
+                      console.error('Error deleting batch:', error);
+                      alert('Failed to delete batch');
+                    }
+                  }}
+                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
         <h4 className="font-semibold text-blue-900 mb-2">Maximum Automation Workflow:</h4>

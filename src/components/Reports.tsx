@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { TrendingUp, TrendingDown, FileText, DollarSign, Calendar, ChevronRight } from 'lucide-react';
+import { TrendingUp, TrendingDown, FileText, DollarSign, Calendar, ChevronRight, BarChart3, Grid } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Transaction, Category } from '../lib/types';
@@ -11,6 +11,9 @@ export default function Reports() {
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<'month' | 'quarter' | 'year' | 'all'>('month');
+  const [viewMode, setViewMode] = useState<'summary' | 'ledger'>('summary');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   useEffect(() => {
     if (user) {
@@ -105,21 +108,66 @@ export default function Reports() {
     );
   }
 
+  const handleDateRangeChange = (range: 'month' | 'quarter' | 'year' | 'all') => {
+    setDateRange(range);
+    const now = new Date();
+    let start = new Date();
+
+    if (range === 'month') {
+      start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    } else if (range === 'quarter') {
+      start = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    } else if (range === 'year') {
+      start = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+    } else {
+      start = new Date('2000-01-01');
+    }
+
+    setStartDate(start.toISOString().split('T')[0]);
+    setEndDate(now.toISOString().split('T')[0]);
+  };
+
   return (
     <div className="space-y-6">
       <div className="bg-gradient-to-br from-blue-600 to-cyan-600 rounded-2xl p-6 text-white shadow-xl">
-        <div className="flex items-center gap-3 mb-2">
-          <FileText className="w-8 h-8" />
-          <h2 className="text-2xl font-bold">Financial Reports</h2>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-3">
+            <FileText className="w-8 h-8" />
+            <div>
+              <h2 className="text-2xl font-bold">Financial Reports</h2>
+              <p className="text-sm opacity-90">Comprehensive view of your finances</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setViewMode('summary')}
+              className={`p-2 rounded-lg transition-colors ${
+                viewMode === 'summary'
+                  ? 'bg-white/30 text-white'
+                  : 'bg-white/10 text-white/70 hover:bg-white/20'
+              }`}
+            >
+              <Grid className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setViewMode('ledger')}
+              className={`p-2 rounded-lg transition-colors ${
+                viewMode === 'ledger'
+                  ? 'bg-white/30 text-white'
+                  : 'bg-white/10 text-white/70 hover:bg-white/20'
+              }`}
+            >
+              <BarChart3 className="w-5 h-5" />
+            </button>
+          </div>
         </div>
-        <p className="text-sm opacity-90">Comprehensive view of your finances</p>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-2">
         {['month', 'quarter', 'year', 'all'].map((range) => (
           <button
             key={range}
-            onClick={() => setDateRange(range as any)}
+            onClick={() => handleDateRangeChange(range as any)}
             className={`px-4 py-2 rounded-xl font-medium whitespace-nowrap transition-all ${
               dateRange === range
                 ? 'bg-blue-600 text-white shadow-lg'
@@ -130,6 +178,26 @@ export default function Reports() {
           </button>
         ))}
       </div>
+
+      {viewMode === 'ledger' && (
+        <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
+          <h3 className="font-semibold text-gray-900 mb-3">Custom Date Range</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="px-4 py-2 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500"
+            />
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="px-4 py-2 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-white/80 backdrop-blur-lg rounded-xl p-4 shadow-lg">
@@ -182,8 +250,9 @@ export default function Reports() {
         </div>
       </div>
 
-      <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
-        <h3 className="font-semibold text-gray-900 mb-4">Category-wise Breakdown</h3>
+      {viewMode === 'summary' && (
+        <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
+          <h3 className="font-semibold text-gray-900 mb-4">Category-wise Breakdown</h3>
         {categoryBreakdown.length === 0 ? (
           <p className="text-gray-500 text-center py-8">No transactions in this period</p>
         ) : (
@@ -251,7 +320,85 @@ export default function Reports() {
             ))}
           </div>
         )}
-      </div>
+        </div>
+      )}
+
+      {viewMode === 'ledger' && (
+        <div className="space-y-6">
+          <h3 className="text-lg font-semibold text-gray-900">Ledger View - Category Wise Details</h3>
+
+          <div className="grid gap-4">
+            {categories.filter(cat => {
+              const categoryTxns = transactions.filter(t => t.category_id === cat.id);
+              return categoryTxns.length > 0;
+            }).map((cat) => {
+              const categoryTxns = transactions
+                .filter(t => t.category_id === cat.id)
+                .sort((a, b) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime());
+
+              const subtotal = categoryTxns.reduce((sum, t) => sum + t.amount, 0);
+
+              return (
+                <div key={cat.id} className="bg-white/80 backdrop-blur-lg rounded-2xl p-4 shadow-lg">
+                  <div className="flex items-center gap-3 mb-4 pb-3 border-b border-gray-200">
+                    <div
+                      className="w-12 h-12 rounded-full flex items-center justify-center"
+                      style={{ backgroundColor: cat.color + '20' }}
+                    >
+                      <span className="text-xl">{cat.icon}</span>
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-bold text-gray-900">{cat.name}</p>
+                      <p className="text-sm text-gray-600">{categoryTxns.length} transactions</p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-lg font-bold ${cat.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                        {cat.type === 'income' ? '+' : '-'}₹{subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                      </p>
+                      <p className="text-xs text-gray-600">
+                        Avg: ₹{(subtotal / categoryTxns.length).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {categoryTxns.map((transaction, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900 text-sm truncate">
+                            {transaction.final_description || transaction.ai_description || transaction.original_description}
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                            <Calendar className="w-3 h-3" />
+                            <span>{new Date(transaction.transaction_date).toLocaleDateString()}</span>
+                          </div>
+                          {transaction.notes && (
+                            <p className="text-xs text-gray-600 mt-1">{transaction.notes}</p>
+                          )}
+                        </div>
+                        <div className={`font-bold text-sm ml-3 whitespace-nowrap ${
+                          transaction.type === 'credit' ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {transaction.type === 'credit' ? '+' : '-'}₹{transaction.amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            {categories.filter(cat => {
+              const categoryTxns = transactions.filter(t => t.category_id === cat.id);
+              return categoryTxns.length > 0;
+            }).length === 0 && (
+              <div className="bg-white/80 backdrop-blur-lg rounded-2xl p-8 text-center shadow-lg">
+                <p className="text-gray-500">No transactions found in selected date range</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
         <h4 className="font-semibold text-blue-900 mb-2">Report Features:</h4>
