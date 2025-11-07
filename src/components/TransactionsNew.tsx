@@ -8,6 +8,7 @@ import { AIService } from '../services/aiService';
 import CashTransaction from './CashTransaction';
 import TransactionMapperFlow from './TransactionMapperFlow';
 import BankConfirmation from './BankConfirmation';
+import MappedTransactionsViewer from './MappedTransactionsViewer';
 
 export default function TransactionsNew() {
   const { user, profile } = useAuth();
@@ -21,7 +22,9 @@ export default function TransactionsNew() {
   const [editingBank, setEditingBank] = useState<string | null>(null);
   const [bankListExpanded, setBankListExpanded] = useState(true);
   const [showMapper, setShowMapper] = useState(false);
+  const [showMappedTransactions, setShowMappedTransactions] = useState(false);
   const [unmappedCount, setUnmappedCount] = useState(0);
+  const [mappedCount, setMappedCount] = useState(0);
 
   const [newBank, setNewBank] = useState({
     bank_name: '',
@@ -66,15 +69,24 @@ export default function TransactionsNew() {
 
   const checkUnmappedTransactions = async () => {
     try {
-      const { count } = await supabase
-        .from('transactions')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', user!.id)
-        .eq('mapping_status', 'unmapped');
+      const [unmappedResult, mappedResult] = await Promise.all([
+        supabase
+          .from('transactions')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user!.id)
+          .eq('mapping_status', 'unmapped'),
+        supabase
+          .from('transactions')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user!.id)
+          .eq('mapping_status', 'mapped')
+          .eq('is_approved', true)
+      ]);
 
-      setUnmappedCount(count || 0);
+      setUnmappedCount(unmappedResult.count || 0);
+      setMappedCount(mappedResult.count || 0);
     } catch (error) {
-      console.error('Error checking unmapped transactions:', error);
+      console.error('Error checking transactions:', error);
     }
   };
 
@@ -354,6 +366,17 @@ export default function TransactionsNew() {
     );
   }
 
+  if (showMappedTransactions) {
+    return (
+      <MappedTransactionsViewer
+        onClose={() => {
+          setShowMappedTransactions(false);
+          checkUnmappedTransactions();
+        }}
+      />
+    );
+  }
+
   if (showMapper) {
     return (
       <TransactionMapperFlow
@@ -375,6 +398,25 @@ export default function TransactionsNew() {
         <p className="text-sm opacity-90">Upload statements or add cash transactions</p>
       </div>
 
+      {mappedCount > 0 && (
+        <div
+          onClick={() => setShowMappedTransactions(true)}
+          className="bg-gradient-to-br from-green-500 to-emerald-500 rounded-2xl p-6 text-white shadow-xl cursor-pointer transform hover:scale-[1.02] transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h3 className="text-xl font-bold mb-1">Pending Items</h3>
+              <p className="text-sm opacity-90">
+                {mappedCount} transaction{mappedCount !== 1 ? 's' : ''} ready to review
+              </p>
+            </div>
+            <div className="bg-white/20 rounded-full p-3">
+              <List className="w-8 h-8" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {unmappedCount > 0 && (
         <div
           onClick={() => setShowMapper(true)}
@@ -382,7 +424,7 @@ export default function TransactionsNew() {
         >
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-xl font-bold mb-1">Map Unmapped Transactions</h3>
+              <h3 className="text-xl font-bold mb-1">Unaccounted Transactions</h3>
               <p className="text-sm opacity-90">
                 {unmappedCount} transaction{unmappedCount !== 1 ? 's' : ''} need{unmappedCount === 1 ? 's' : ''} categorization
               </p>

@@ -269,34 +269,42 @@ export class PDFParser {
     }
 
     let headerEndIndex = 0;
-    for (let i = 0; i < Math.min(15, lines.length); i++) {
+    let foundHeader = false;
+    for (let i = 0; i < Math.min(20, lines.length); i++) {
       const line = lines[i].toLowerCase();
       if (
-        (line.includes('date') && (line.includes('debit') || line.includes('credit') || line.includes('amount'))) ||
-        line.includes('transaction') ||
-        line.includes('particulars') ||
-        line.includes('narration')
+        (line.includes('date') && (line.includes('debit') || line.includes('credit') || line.includes('amount') || line.includes('withdrawal') || line.includes('deposit'))) ||
+        (line.includes('transaction') && line.includes('date')) ||
+        (line.includes('particulars') && line.includes('amount')) ||
+        (line.includes('narration') && line.includes('date')) ||
+        (line.includes('txn') && line.includes('date'))
       ) {
         headerEndIndex = i + 1;
+        foundHeader = true;
       }
     }
 
-    const dataLines = lines.slice(headerEndIndex);
+    const dataLines = lines.slice(foundHeader ? headerEndIndex : 0);
 
-    const datePattern = /\b(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}|\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2})\b/;
+    const datePattern = /\b(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}|\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}|\d{2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4})\b/;
 
     for (let i = 0; i < dataLines.length; i++) {
       const line = dataLines[i];
-      if (!line.trim() || line.trim().length < 10) continue;
+      if (!line.trim() || line.trim().length < 8) continue;
 
       const lineLower = line.toLowerCase();
 
       if (
         lineLower.includes('opening balance') ||
         lineLower.includes('closing balance') ||
-        lineLower.includes('total') ||
+        lineLower.includes('total debit') ||
+        lineLower.includes('total credit') ||
         lineLower.includes('balance b/f') ||
-        lineLower.includes('balance c/f')
+        lineLower.includes('balance c/f') ||
+        lineLower.includes('grand total') ||
+        lineLower.includes('statement period') ||
+        lineLower.includes('page ') ||
+        lineLower.includes('continued')
       ) {
         continue;
       }
@@ -306,10 +314,11 @@ export class PDFParser {
 
       const amounts: number[] = [];
       let match;
-      const tempAmountPattern = /(?:^|\s)(\d{1,3}(?:,\d{3})*(?:\.\d{2})?|\d+\.\d{2}|\d+)(?:\s|$)/g;
+      const tempAmountPattern = /(?:^|\s|\t)(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+\.\d{1,2}|\d{4,})(?:\s|$|\t)/g;
       while ((match = tempAmountPattern.exec(line)) !== null) {
-        const amt = parseFloat(match[1].replace(/,/g, ''));
-        if (amt > 0 && amt < 10000000) {
+        const cleanAmount = match[1].replace(/,/g, '');
+        const amt = parseFloat(cleanAmount);
+        if (amt > 0.01 && amt < 100000000) {
           amounts.push(amt);
         }
       }
@@ -321,43 +330,57 @@ export class PDFParser {
 
       let description = line
         .replace(datePattern, '')
-        .replace(/\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g, '')
+        .replace(/\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/g, '')
         .replace(/\s+/g, ' ')
-        .replace(/[^\w\s\-]/g, '')
+        .replace(/[^\w\s\-\/]/g, '')
         .trim();
 
+      const descLower = description.toLowerCase();
+      if (descLower.includes('dr') || descLower.includes('cr')) {
+        description = description.replace(/\b(dr|cr|DR|CR)\b/gi, '').trim();
+      }
+
       if (description.length < 3) {
-        if (i + 1 < dataLines.length) {
-          const nextLine = dataLines[i + 1];
-          if (!nextLine.match(datePattern)) {
-            description += ' ' + nextLine.replace(/\d{1,3}(?:,\d{3})*(?:\.\d{2})?/g, '').trim();
+        for (let j = i + 1; j < Math.min(i + 3, dataLines.length); j++) {
+          const nextLine = dataLines[j];
+          if (!nextLine.match(datePattern) && nextLine.trim().length > 0) {
+            const nextDesc = nextLine.replace(/\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/g, '').trim();
+            if (nextDesc.length > 0) {
+              description += ' ' + nextDesc;
+              if (description.length >= 10) break;
+            }
+          } else {
+            break;
           }
         }
       }
 
-      if (description.length > 100) {
-        description = description.substring(0, 100);
+      if (description.length > 150) {
+        description = description.substring(0, 150);
       }
 
-      if (description.length < 3) continue;
+      description = description.trim();
+      if (description.length < 2) continue;
 
       let amount = 0;
       let type: 'debit' | 'credit' = 'debit';
       let confidence = 0.8;
 
       const hasCreditMarker =
-        lineLower.includes('cr ') ||
-        lineLower.includes(' cr') ||
+        /\bcr\b/i.test(line) ||
         lineLower.includes('credit') ||
         lineLower.includes('deposit') ||
-        lineLower.endsWith('cr');
+        lineLower.includes('received') ||
+        lineLower.includes('salary') ||
+        lineLower.includes('refund');
 
       const hasDebitMarker =
-        lineLower.includes('dr ') ||
-        lineLower.includes(' dr') ||
+        /\bdr\b/i.test(line) ||
         lineLower.includes('debit') ||
         lineLower.includes('withdrawal') ||
-        lineLower.endsWith('dr');
+        lineLower.includes('withdraw') ||
+        lineLower.includes('payment') ||
+        lineLower.includes('purchase');
 
       if (hasCreditMarker && !hasDebitMarker) {
         type = 'credit';
@@ -370,14 +393,19 @@ export class PDFParser {
         confidence = 0.6;
       }
 
-      if (amounts.length >= 3) {
-        amount = amounts[amounts.length - 2];
-        confidence = Math.min(confidence, 0.7);
+      if (amounts.length === 1) {
+        amount = amounts[0];
       } else if (amounts.length === 2) {
         amount = amounts[0];
-        confidence = Math.min(confidence, 0.8);
-      } else {
-        amount = amounts[0];
+        confidence = Math.min(confidence, 0.85);
+      } else if (amounts.length === 3) {
+        amount = amounts[1];
+        confidence = Math.min(confidence, 0.75);
+      } else if (amounts.length >= 4) {
+        const sortedAmounts = [...amounts].sort((a, b) => b - a);
+        amount = sortedAmounts[1] || amounts[0];
+        confidence = Math.min(confidence, 0.65);
+        warnings.push('Multiple amounts detected - using most likely transaction amount');
       }
 
       if (amount <= 0 || isNaN(amount)) continue;
