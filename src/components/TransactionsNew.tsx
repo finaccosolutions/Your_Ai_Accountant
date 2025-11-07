@@ -40,7 +40,8 @@ export default function TransactionsNew() {
     balance: 0,
   });
   const [showBankConfirmation, setShowBankConfirmation] = useState(false);
-  const [bankToConfirm, setBankToConfirm] = useState<Bank | null>(null);
+  const [detectedBankName, setDetectedBankName] = useState('');
+  const [detectedAccountNumber, setDetectedAccountNumber] = useState('');
   const [transactionCountToConfirm, setTransactionCountToConfirm] = useState(0);
   const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
   const [uploadBatches, setUploadBatches] = useState<UploadBatch[]>([]);
@@ -74,7 +75,8 @@ export default function TransactionsNew() {
           .from('transactions')
           .select('*', { count: 'exact', head: true })
           .eq('user_id', user!.id)
-          .eq('mapping_status', 'unmapped'),
+          .eq('mapping_status', 'unmapped')
+          .not('bank_id', 'is', null),
         supabase
           .from('transactions')
           .select('*', { count: 'exact', head: true })
@@ -158,40 +160,11 @@ export default function TransactionsNew() {
         throw new Error('No transactions found in the file');
       }
 
-
-      let existingBank = banks.find(
-        b => b.bank_name.toLowerCase() === bankInfo.bankName.toLowerCase() &&
-             b.account_number.includes(bankInfo.accountNumber)
-      );
-
-      let bankId: string;
-
-      if (!existingBank) {
-        const { data: newBankData, error: bankError } = await supabase
-          .from('banks')
-          .insert({
-            user_id: user!.id,
-            bank_name: bankInfo.bankName,
-            account_number: bankInfo.accountNumber,
-            account_type: 'savings',
-            balance: 0,
-          })
-          .select()
-          .single();
-
-        if (bankError) throw bankError;
-        bankId = newBankData.id;
-        await loadData();
-        existingBank = newBankData;
-      } else {
-        bankId = existingBank.id;
-      }
-
       const { data: batch, error: batchError } = await supabase
         .from('upload_batches')
         .insert({
           user_id: user!.id,
-          bank_id: bankId,
+          bank_id: null,
           file_name: file.name,
           file_type: file.name.split('.').pop() || 'unknown',
           detected_bank: bankInfo.bankName,
@@ -232,7 +205,7 @@ export default function TransactionsNew() {
 
         transactionsToInsert.push({
           user_id: user!.id,
-          bank_id: bankId,
+          bank_id: null,
           batch_id: batch.id,
           transaction_date: t.date,
           amount: t.amount,
@@ -265,12 +238,11 @@ export default function TransactionsNew() {
       setFile(null);
       await loadUploadBatches();
 
-      if (existingBank) {
-        setBankToConfirm(existingBank);
-        setTransactionCountToConfirm(transactions.length);
-        setCurrentBatchId(batch.id);
-        setShowBankConfirmation(true);
-      }
+      setDetectedBankName(bankInfo.bankName);
+      setDetectedAccountNumber(bankInfo.accountNumber);
+      setTransactionCountToConfirm(transactions.length);
+      setCurrentBatchId(batch.id);
+      setShowBankConfirmation(true);
     } catch (error) {
       console.error('Upload error:', error);
       setStatus({
@@ -344,15 +316,17 @@ export default function TransactionsNew() {
     });
   };
 
-  if (showBankConfirmation && bankToConfirm) {
+  if (showBankConfirmation) {
     return (
       <BankConfirmation
-        bank={bankToConfirm}
+        detectedBankName={detectedBankName}
+        detectedAccountNumber={detectedAccountNumber}
         transactionCount={transactionCountToConfirm}
         batchId={currentBatchId || ''}
         onConfirm={(bankId) => {
           setShowBankConfirmation(false);
-          setCurrentBatchId(null);
+          loadData();
+          checkUnmappedTransactions();
           setTimeout(() => {
             setShowMapper(true);
           }, 500);
@@ -360,6 +334,8 @@ export default function TransactionsNew() {
         onCancel={() => {
           setShowBankConfirmation(false);
           setStatus(null);
+          loadData();
+          loadUploadBatches();
           checkUnmappedTransactions();
         }}
       />

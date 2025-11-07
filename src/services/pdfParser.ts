@@ -19,6 +19,10 @@ export interface BankDetectionResult {
 }
 
 const BANK_PATTERNS = {
+  'Federal Bank': {
+    keywords: ['federal', 'federal bank', 'federalbank'],
+    accountPattern: /(?:account|a\/c|ac)[\s\w]*(?:no|number|num)?[\s:.\-]*(\d{4,})/i,
+  },
   'HDFC Bank': {
     keywords: ['hdfc', 'hdfc bank', 'hdfcbank'],
     accountPattern: /(?:account|a\/c|ac)[\s\w]*(?:no|number|num)?[\s:.\-]*(\d{4,})/i,
@@ -396,10 +400,22 @@ export class PDFParser {
       if (amounts.length === 1) {
         amount = amounts[0];
       } else if (amounts.length === 2) {
-        amount = amounts[0];
+        if (hasCreditMarker) {
+          amount = amounts[0];
+        } else if (hasDebitMarker) {
+          amount = amounts[0];
+        } else {
+          amount = amounts[0];
+        }
         confidence = Math.min(confidence, 0.85);
       } else if (amounts.length === 3) {
-        amount = amounts[1];
+        if (hasCreditMarker) {
+          amount = amounts[1];
+        } else if (hasDebitMarker) {
+          amount = amounts[0];
+        } else {
+          amount = amounts[1];
+        }
         confidence = Math.min(confidence, 0.75);
       } else if (amounts.length >= 4) {
         const sortedAmounts = [...amounts].sort((a, b) => b - a);

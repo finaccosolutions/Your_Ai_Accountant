@@ -37,6 +37,7 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
         .select('*, category:categories(*), bank:banks(*)')
         .eq('user_id', user!.id)
         .eq('mapping_status', 'unmapped')
+        .not('bank_id', 'is', null)
         .order('transaction_date', { ascending: false });
 
       if (batchId) {
