@@ -211,7 +211,7 @@ export default function TransactionsNew() {
           amount: t.amount,
           type: t.type,
           original_description: t.description,
-          ai_description: t.description,
+          ai_description: aiResult?.description || null,
           ai_category_suggestion: aiResult?.categoryId || null,
           category_id: null,
           mapping_status: 'unmapped',
@@ -323,13 +323,11 @@ export default function TransactionsNew() {
         detectedAccountNumber={detectedAccountNumber}
         transactionCount={transactionCountToConfirm}
         batchId={currentBatchId || ''}
-        onConfirm={(bankId) => {
+        onConfirm={async (bankId) => {
           setShowBankConfirmation(false);
-          loadData();
-          checkUnmappedTransactions();
-          setTimeout(() => {
-            setShowMapper(true);
-          }, 500);
+          await loadData();
+          await checkUnmappedTransactions();
+          setShowMapper(true);
         }}
         onCancel={() => {
           setShowBankConfirmation(false);

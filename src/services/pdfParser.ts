@@ -96,7 +96,7 @@ export class PDFParser {
 
       items.forEach((item) => {
         if (item.str.trim()) {
-          const y = Math.round(item.transform[5]);
+          const y = Math.round(item.transform[5] / 2) * 2;
           const x = Math.round(item.transform[4]);
 
           if (!pageLines.has(y)) {
@@ -290,8 +290,8 @@ export class PDFParser {
 
     let headerEndIndex = 0;
     let foundHeader = false;
-    let debitColKeywords: string[] = [];
-    let creditColKeywords: string[] = [];
+    let hasDebitColumn = false;
+    let hasCreditColumn = false;
 
     for (let i = 0; i < Math.min(30, lines.length); i++) {
       const line = lines[i].toLowerCase();
@@ -305,12 +305,8 @@ export class PDFParser {
         headerEndIndex = i + 1;
         foundHeader = true;
 
-        if (line.includes('withdrawal') || line.match(/\bdr\b/) || line.includes('debit')) {
-          debitColKeywords.push('withdrawal', 'dr', 'debit');
-        }
-        if (line.includes('deposit') || line.match(/\bcr\b/) || line.includes('credit')) {
-          creditColKeywords.push('deposit', 'cr', 'credit');
-        }
+        hasDebitColumn = line.includes('withdrawal') || line.match(/\bdr\b/) || line.includes('debit') || line.includes('withdraw');
+        hasCreditColumn = line.includes('deposit') || line.match(/\bcr\b/) || line.includes('credit');
 
         break;
       }
@@ -363,7 +359,7 @@ export class PDFParser {
       let currentLine = line;
       descriptionLines.push(currentLine);
 
-      for (let j = i + 1; j < Math.min(i + 5, dataLines.length); j++) {
+      for (let j = i + 1; j < Math.min(i + 8, dataLines.length); j++) {
         const nextLine = dataLines[j];
         const nextLineLower = nextLine.toLowerCase();
 
@@ -379,9 +375,11 @@ export class PDFParser {
         }
 
         const hasAmount = /\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/.test(nextLine);
-        if (!hasAmount && nextLine.trim().length > 0 && nextLine.trim().length < 100) {
+        const hasMarker = /\b(dr|cr|debit|credit)\b/i.test(nextLine);
+
+        if (!hasAmount && !hasMarker && nextLine.trim().length > 0 && nextLine.trim().length < 150) {
           descriptionLines.push(nextLine);
-        } else {
+        } else if (hasAmount || hasMarker) {
           break;
         }
       }
@@ -430,23 +428,27 @@ export class PDFParser {
       let confidence = 0.7;
 
       const hasCreditMarker =
-        /\bCR\b/i.test(fullText) ||
-        lineLower.includes('credit') ||
-        lineLower.includes('deposit') ||
+        /\bCR\b/.test(fullText) ||
+        /\bCr\b/.test(fullText) ||
+        /\bcredit\b/i.test(lineLower) ||
+        /\bdeposit\b/i.test(lineLower) ||
         lineLower.includes('received') ||
         lineLower.includes('salary') ||
         lineLower.includes('refund') ||
-        lineLower.includes('interest credited');
+        lineLower.includes('interest credited') ||
+        lineLower.includes('credited');
 
       const hasDebitMarker =
-        /\bDR\b/i.test(fullText) ||
-        lineLower.includes('debit') ||
-        lineLower.includes('withdrawal') ||
-        lineLower.includes('withdraw') ||
+        /\bDR\b/.test(fullText) ||
+        /\bDr\b/.test(fullText) ||
+        /\bdebit\b/i.test(lineLower) ||
+        /\bwithdrawal\b/i.test(lineLower) ||
+        /\bwithdraw\b/i.test(lineLower) ||
         lineLower.includes('payment') ||
         lineLower.includes('purchase') ||
         lineLower.includes('transfer to') ||
-        lineLower.includes('paid to');
+        lineLower.includes('paid to') ||
+        lineLower.includes('debited');
 
       if (amounts.length === 1) {
         amount = amounts[0];
@@ -464,53 +466,66 @@ export class PDFParser {
         }
 
       } else if (amounts.length === 2) {
-        if (hasCreditMarker && !hasDebitMarker) {
-          type = 'credit';
-          amount = amounts[0];
-          confidence = 0.85;
-        } else if (hasDebitMarker && !hasCreditMarker) {
-          type = 'debit';
-          amount = amounts[0];
-          confidence = 0.85;
-        } else {
-          const debitColIndex = fullText.toLowerCase().indexOf('debit');
-          const creditColIndex = fullText.toLowerCase().indexOf('credit');
-          const withdrawalIndex = fullText.toLowerCase().indexOf('withdrawal');
-          const depositIndex = fullText.toLowerCase().indexOf('deposit');
+        if (hasDebitColumn && hasCreditColumn) {
+          const firstAmountPos = fullText.indexOf(amounts[0].toString());
+          const secondAmountPos = fullText.indexOf(amounts[1].toString(), firstAmountPos + 1);
 
-          if ((debitColIndex !== -1 || withdrawalIndex !== -1) &&
-              (creditColIndex === -1 && depositIndex === -1)) {
-            type = 'debit';
-            amount = amounts[0];
-            confidence = 0.75;
-          } else if ((creditColIndex !== -1 || depositIndex !== -1) &&
-                     (debitColIndex === -1 && withdrawalIndex === -1)) {
-            type = 'credit';
-            amount = amounts[0];
-            confidence = 0.75;
+          if (firstAmountPos !== -1 && secondAmountPos !== -1) {
+            const textBeforeFirst = fullText.substring(0, firstAmountPos).toLowerCase();
+            const textBetween = fullText.substring(firstAmountPos, secondAmountPos).toLowerCase();
+
+            if (textBeforeFirst.includes('debit') || textBeforeFirst.includes('withdrawal') ||textBeforeFirst.includes('dr')) {
+              type = 'debit';
+              amount = amounts[0];
+              confidence = 0.9;
+            } else if (textBeforeFirst.includes('credit') || textBeforeFirst.includes('deposit') || textBeforeFirst.includes('cr')) {
+              type = 'credit';
+              amount = amounts[0];
+              confidence = 0.9;
+            } else if (textBetween.includes('debit') || textBetween.includes('withdrawal')) {
+              type = 'debit';
+              amount = amounts[0];
+              confidence = 0.85;
+            } else if (textBetween.includes('credit') || textBetween.includes('deposit')) {
+              type = 'credit';
+              amount = amounts[1];
+              confidence = 0.85;
+            } else {
+              amount = amounts[0];
+              type = hasCreditMarker ? 'credit' : 'debit';
+              confidence = 0.7;
+            }
           } else {
             amount = amounts[0];
-            type = 'debit';
-            confidence = 0.6;
-            warnings.push('Multiple amounts - using first as transaction amount');
+            type = hasCreditMarker ? 'credit' : 'debit';
+            confidence = 0.7;
           }
+        } else {
+          amount = amounts[0];
+          type = hasCreditMarker && !hasDebitMarker ? 'credit' : 'debit';
+          confidence = 0.75;
         }
 
       } else if (amounts.length >= 3) {
-        if (hasCreditMarker && !hasDebitMarker) {
-          type = 'credit';
+        if (hasDebitColumn && hasCreditColumn) {
           amount = amounts[0];
-          confidence = 0.75;
-        } else if (hasDebitMarker && !hasCreditMarker) {
-          type = 'debit';
-          amount = amounts[0];
-          confidence = 0.75;
+
+          if (hasCreditMarker && !hasDebitMarker) {
+            type = 'credit';
+            confidence = 0.8;
+          } else if (hasDebitMarker && !hasCreditMarker) {
+            type = 'debit';
+            confidence = 0.8;
+          } else {
+            type = 'debit';
+            confidence = 0.6;
+            warnings.push('Multiple amounts - verify type');
+          }
         } else {
-          const sortedAmounts = [...amounts].sort((a, b) => b - a);
           amount = amounts[0];
-          type = 'debit';
-          confidence = 0.5;
-          warnings.push('Multiple amounts detected - verify transaction amount and type');
+          type = hasCreditMarker && !hasDebitMarker ? 'credit' : 'debit';
+          confidence = 0.65;
+          warnings.push('Multiple amounts detected');
         }
       }
 
