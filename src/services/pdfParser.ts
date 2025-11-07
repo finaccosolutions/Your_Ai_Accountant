@@ -400,21 +400,21 @@ export class PDFParser {
       if (amounts.length === 1) {
         amount = amounts[0];
       } else if (amounts.length === 2) {
-        if (hasCreditMarker) {
+        if (hasCreditMarker && !hasDebitMarker) {
           amount = amounts[0];
-        } else if (hasDebitMarker) {
+        } else if (hasDebitMarker && !hasCreditMarker) {
           amount = amounts[0];
         } else {
           amount = amounts[0];
         }
         confidence = Math.min(confidence, 0.85);
       } else if (amounts.length === 3) {
-        if (hasCreditMarker) {
-          amount = amounts[1];
-        } else if (hasDebitMarker) {
+        if (hasCreditMarker && !hasDebitMarker) {
+          amount = amounts[0];
+        } else if (hasDebitMarker && !hasCreditMarker) {
           amount = amounts[0];
         } else {
-          amount = amounts[1];
+          amount = amounts[0];
         }
         confidence = Math.min(confidence, 0.75);
       } else if (amounts.length >= 4) {

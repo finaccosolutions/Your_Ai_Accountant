@@ -159,13 +159,36 @@ export default function CashTransaction({ onClose, onSuccess }: CashTransactionP
 
       if (error) throw error;
 
-      await supabase.from('ai_learning_patterns').insert({
-        user_id: user!.id,
-        original_description: formData.description,
-        category_id: formData.category_id,
-        confidence_score: 0.9,
-        usage_count: 1,
-      });
+      // Check if learning pattern exists
+      const { data: existingPattern } = await supabase
+        .from('ai_learning_patterns')
+        .select('*')
+        .eq('user_id', user!.id)
+        .eq('original_description', formData.description)
+        .maybeSingle();
+
+      if (existingPattern) {
+        // Update existing pattern
+        await supabase
+          .from('ai_learning_patterns')
+          .update({
+            category_id: formData.category_id,
+            usage_count: existingPattern.usage_count + 1,
+            last_used_at: new Date().toISOString(),
+            confidence_score: Math.min(existingPattern.confidence_score + 0.05, 0.99),
+          })
+          .eq('id', existingPattern.id);
+      } else {
+        // Insert new pattern
+        await supabase.from('ai_learning_patterns').insert({
+          user_id: user!.id,
+          original_description: formData.description,
+          category_id: formData.category_id,
+          confidence_score: 0.9,
+          usage_count: 1,
+          last_used_at: new Date().toISOString(),
+        });
+      }
 
       onSuccess();
       onClose();

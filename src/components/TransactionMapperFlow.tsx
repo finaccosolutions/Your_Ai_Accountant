@@ -89,13 +89,36 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
         })
         .eq('id', currentTransaction.id);
 
-      await supabase.from('ai_learning_patterns').upsert({
-        user_id: user!.id,
-        original_description: currentTransaction.original_description || editedDescription,
-        category_id: editedCategory,
-        confidence_score: 0.9,
-        usage_count: 1,
-      });
+      // Check if learning pattern exists
+      const { data: existingPattern } = await supabase
+        .from('ai_learning_patterns')
+        .select('*')
+        .eq('user_id', user!.id)
+        .eq('original_description', currentTransaction.original_description || editedDescription)
+        .maybeSingle();
+
+      if (existingPattern) {
+        // Update existing pattern
+        await supabase
+          .from('ai_learning_patterns')
+          .update({
+            category_id: editedCategory,
+            usage_count: existingPattern.usage_count + 1,
+            last_used_at: new Date().toISOString(),
+            confidence_score: Math.min(existingPattern.confidence_score + 0.05, 0.99),
+          })
+          .eq('id', existingPattern.id);
+      } else {
+        // Insert new pattern
+        await supabase.from('ai_learning_patterns').insert({
+          user_id: user!.id,
+          original_description: currentTransaction.original_description || editedDescription,
+          category_id: editedCategory,
+          confidence_score: 0.9,
+          usage_count: 1,
+          last_used_at: new Date().toISOString(),
+        });
+      }
 
       const newTransactions = transactions.filter((_, i) => i !== currentIndex);
       setTransactions(newTransactions);
