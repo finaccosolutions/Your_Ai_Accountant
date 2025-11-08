@@ -25,6 +25,12 @@ interface TextItem {
   width: number;
 }
 
+interface ColumnDefinition {
+  name: string;
+  xStart: number;
+  xEnd: number;
+}
+
 const BANK_PATTERNS = {
   'Federal Bank': {
     keywords: ['federal', 'federal bank', 'federalbank'],
@@ -96,7 +102,7 @@ export class PDFParser {
 
       items.forEach((item) => {
         if (item.str.trim()) {
-          const y = Math.round(item.transform[5] / 2) * 2;
+          const y = Math.round(item.transform[5]);
           const x = Math.round(item.transform[4]);
 
           if (!pageLines.has(y)) {
@@ -114,14 +120,15 @@ export class PDFParser {
 
       const sortedLines = Array.from(pageLines.entries())
         .sort((a, b) => b[0] - a[0])
-        .map(([_, items]) => {
+        .map(([y, items]) => {
           const sortedItems = items.sort((a, b) => a.x - b.x);
-          return sortedItems.map(item => item.str).join(' ').trim();
-        })
-        .filter(line => line.length > 0);
+          return { y, items: sortedItems };
+        });
 
-      const pageText = sortedLines.join('\n');
-      fullText += pageText + '\n';
+      for (const { items } of sortedLines) {
+        const lineText = items.map(item => item.str).join(' ').trim();
+        fullText += lineText + '\n';
+      }
     }
 
     return fullText;
@@ -180,8 +187,8 @@ export class PDFParser {
 
       const date = this.parseExcelDate(dateValue);
 
-      let description = descIdx >= 0 ? String(row[descIdx] || '').trim() : 'Unknown';
-      if (!description || description === 'Unknown' || description.length < 3) continue;
+      let description = descIdx >= 0 ? String(row[descIdx] || '').trim() : '';
+      if (!description || description.length < 2) continue;
 
       description = description.replace(/[\*#@]/g, '').trim();
 
@@ -288,41 +295,29 @@ export class PDFParser {
       return [];
     }
 
-    let headerEndIndex = 0;
-    let foundHeader = false;
-    let hasDebitColumn = false;
-    let hasCreditColumn = false;
+    let headerLine = -1;
+    let columns: ColumnDefinition[] = [];
 
     for (let i = 0; i < Math.min(30, lines.length); i++) {
       const line = lines[i].toLowerCase();
 
       if (line.includes('date') &&
-          (line.includes('debit') || line.includes('credit') ||
-           line.includes('withdrawal') || line.includes('deposit') ||
-           line.includes('amount') || line.includes('particulars') ||
-           line.includes('narration'))) {
-
-        headerEndIndex = i + 1;
-        foundHeader = true;
-
-        hasDebitColumn = line.includes('withdrawal') || line.match(/\bdr\b/) || line.includes('debit') || line.includes('withdraw');
-        hasCreditColumn = line.includes('deposit') || line.match(/\bcr\b/) || line.includes('credit');
-
+          (line.includes('particulars') || line.includes('description') || line.includes('narration')) &&
+          (line.includes('debit') || line.includes('credit') || line.includes('withdrawal') || line.includes('deposit'))) {
+        headerLine = i;
         break;
       }
     }
 
-    const dataLines = lines.slice(foundHeader ? headerEndIndex : 0);
+    if (headerLine === -1) {
+      return [];
+    }
 
     const datePattern = /\b(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}|\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}|\d{2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4})\b/;
 
-    let i = 0;
-    while (i < dataLines.length) {
-      const line = dataLines[i];
-      if (!line.trim() || line.trim().length < 8) {
-        i++;
-        continue;
-      }
+    for (let i = headerLine + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim() || line.trim().length < 10) continue;
 
       const lineLower = line.toLowerCase();
 
@@ -335,92 +330,63 @@ export class PDFParser {
         lineLower.includes('balance c/f') ||
         lineLower.includes('grand total') ||
         lineLower.includes('statement period') ||
-        lineLower.includes('statement summary') ||
-        lineLower.match(/^page\s+\d+/) ||
-        lineLower.includes('continued on next page') ||
-        lineLower.includes('continued from previous')
+        lineLower.match(/^page\s+\d+/)
       ) {
-        i++;
         continue;
       }
 
       const dateMatch = line.match(datePattern);
-      if (!dateMatch) {
-        i++;
+      if (!dateMatch) continue;
+
+      const warnings: string[] = [];
+      const date = this.parseDate(dateMatch[0]);
+
+      const parts = line.split(/\s{2,}/);
+
+      if (parts.length < 3) {
         continue;
       }
-
-      const date = this.parseDate(dateMatch[0]);
-      const warnings: string[] = [];
 
       let description = '';
-      let descriptionLines: string[] = [];
+      let debitAmount = 0;
+      let creditAmount = 0;
+      let balance = 0;
 
-      let currentLine = line;
-      descriptionLines.push(currentLine);
-
-      for (let j = i + 1; j < Math.min(i + 8, dataLines.length); j++) {
-        const nextLine = dataLines[j];
-        const nextLineLower = nextLine.toLowerCase();
-
-        if (nextLine.match(datePattern)) {
-          break;
-        }
-
-        if (nextLineLower.includes('opening balance') ||
-            nextLineLower.includes('closing balance') ||
-            nextLineLower.includes('total debit') ||
-            nextLineLower.includes('total credit')) {
-          break;
-        }
-
-        const hasAmount = /\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/.test(nextLine);
-        const hasMarker = /\b(dr|cr|debit|credit)\b/i.test(nextLine);
-
-        if (!hasAmount && !hasMarker && nextLine.trim().length > 0 && nextLine.trim().length < 150) {
-          descriptionLines.push(nextLine);
-        } else if (hasAmount || hasMarker) {
-          break;
-        }
-      }
-
-      const fullText = descriptionLines.join(' ');
+      const amountPattern = /^\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?$|^\d+\.\d{1,2}$/;
 
       const amounts: number[] = [];
-      let match;
-      const amountPattern = /(?:^|\s)(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+\.\d{1,2}|\d{4,})(?:\s|$)/g;
+      const nonAmountParts: string[] = [];
 
-      while ((match = amountPattern.exec(fullText)) !== null) {
-        const cleanAmount = match[1].replace(/,/g, '');
-        const amt = parseFloat(cleanAmount);
-        if (amt > 0.01 && amt < 100000000) {
-          amounts.push(amt);
+      for (const part of parts) {
+        const cleanPart = part.trim();
+        if (!cleanPart) continue;
+
+        if (datePattern.test(cleanPart)) {
+          continue;
+        }
+
+        const cleanAmount = cleanPart.replace(/,/g, '');
+        if (amountPattern.test(cleanAmount)) {
+          const amt = parseFloat(cleanAmount);
+          if (amt > 0 && amt < 100000000) {
+            amounts.push(amt);
+          }
+        } else {
+          const withoutMarkers = cleanPart.replace(/\b(DR|CR|Dr|Cr)\b/g, '').trim();
+          if (withoutMarkers.length > 0) {
+            nonAmountParts.push(withoutMarkers);
+          }
         }
       }
 
-      if (amounts.length === 0) {
-        i++;
+      description = nonAmountParts.join(' ').trim();
+
+      if (description.length < 3) {
         continue;
       }
-
-      description = fullText
-        .replace(datePattern, '')
-        .replace(/\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      description = description
-        .replace(/\b(dr|cr|DR|CR)\b/gi, '')
-        .replace(/[^\w\s\-\/.,()]/g, '')
-        .trim();
 
       if (description.length > 200) {
         description = description.substring(0, 200).trim();
-      }
-
-      if (description.length < 3) {
-        i++;
-        continue;
       }
 
       let amount = 0;
@@ -428,31 +394,21 @@ export class PDFParser {
       let confidence = 0.7;
 
       const hasCreditMarker =
-        /\bCR\b/.test(fullText) ||
-        /\bCr\b/.test(fullText) ||
-        /\bcredit\b/i.test(lineLower) ||
-        /\bdeposit\b/i.test(lineLower) ||
-        lineLower.includes('received') ||
-        lineLower.includes('salary') ||
-        lineLower.includes('refund') ||
-        lineLower.includes('interest credited') ||
-        lineLower.includes('credited');
+        /\bCR\b/.test(line) ||
+        lineLower.includes('credit') ||
+        lineLower.includes('deposit') ||
+        lineLower.includes('credited') ||
+        lineLower.includes('received');
 
       const hasDebitMarker =
-        /\bDR\b/.test(fullText) ||
-        /\bDr\b/.test(fullText) ||
-        /\bdebit\b/i.test(lineLower) ||
-        /\bwithdrawal\b/i.test(lineLower) ||
-        /\bwithdraw\b/i.test(lineLower) ||
-        lineLower.includes('payment') ||
-        lineLower.includes('purchase') ||
-        lineLower.includes('transfer to') ||
-        lineLower.includes('paid to') ||
-        lineLower.includes('debited');
+        /\bDR\b/.test(line) ||
+        lineLower.includes('debit') ||
+        lineLower.includes('withdrawal') ||
+        lineLower.includes('debited') ||
+        lineLower.includes('paid');
 
       if (amounts.length === 1) {
         amount = amounts[0];
-
         if (hasCreditMarker && !hasDebitMarker) {
           type = 'credit';
           confidence = 0.95;
@@ -462,75 +418,41 @@ export class PDFParser {
         } else {
           type = 'debit';
           confidence = 0.6;
-          warnings.push('Transaction type unclear - defaulted to debit');
+          warnings.push('Transaction type unclear');
         }
-
       } else if (amounts.length === 2) {
-        if (hasDebitColumn && hasCreditColumn) {
-          const firstAmountPos = fullText.indexOf(amounts[0].toString());
-          const secondAmountPos = fullText.indexOf(amounts[1].toString(), firstAmountPos + 1);
-
-          if (firstAmountPos !== -1 && secondAmountPos !== -1) {
-            const textBeforeFirst = fullText.substring(0, firstAmountPos).toLowerCase();
-            const textBetween = fullText.substring(firstAmountPos, secondAmountPos).toLowerCase();
-
-            if (textBeforeFirst.includes('debit') || textBeforeFirst.includes('withdrawal') ||textBeforeFirst.includes('dr')) {
-              type = 'debit';
-              amount = amounts[0];
-              confidence = 0.9;
-            } else if (textBeforeFirst.includes('credit') || textBeforeFirst.includes('deposit') || textBeforeFirst.includes('cr')) {
-              type = 'credit';
-              amount = amounts[0];
-              confidence = 0.9;
-            } else if (textBetween.includes('debit') || textBetween.includes('withdrawal')) {
-              type = 'debit';
-              amount = amounts[0];
-              confidence = 0.85;
-            } else if (textBetween.includes('credit') || textBetween.includes('deposit')) {
-              type = 'credit';
-              amount = amounts[1];
-              confidence = 0.85;
-            } else {
-              amount = amounts[0];
-              type = hasCreditMarker ? 'credit' : 'debit';
-              confidence = 0.7;
-            }
-          } else {
-            amount = amounts[0];
-            type = hasCreditMarker ? 'credit' : 'debit';
-            confidence = 0.7;
-          }
+        if (hasCreditMarker && !hasDebitMarker) {
+          type = 'credit';
+          amount = amounts[0];
+          confidence = 0.85;
+        } else if (hasDebitMarker && !hasCreditMarker) {
+          type = 'debit';
+          amount = amounts[0];
+          confidence = 0.85;
         } else {
           amount = amounts[0];
-          type = hasCreditMarker && !hasDebitMarker ? 'credit' : 'debit';
-          confidence = 0.75;
+          type = 'debit';
+          confidence = 0.7;
+          warnings.push('Multiple amounts - using first');
         }
-
       } else if (amounts.length >= 3) {
-        if (hasDebitColumn && hasCreditColumn) {
+        if (hasCreditMarker && !hasDebitMarker) {
+          type = 'credit';
+          amount = amounts[1];
+          confidence = 0.75;
+        } else if (hasDebitMarker && !hasCreditMarker) {
+          type = 'debit';
           amount = amounts[0];
-
-          if (hasCreditMarker && !hasDebitMarker) {
-            type = 'credit';
-            confidence = 0.8;
-          } else if (hasDebitMarker && !hasCreditMarker) {
-            type = 'debit';
-            confidence = 0.8;
-          } else {
-            type = 'debit';
-            confidence = 0.6;
-            warnings.push('Multiple amounts - verify type');
-          }
+          confidence = 0.75;
         } else {
           amount = amounts[0];
-          type = hasCreditMarker && !hasDebitMarker ? 'credit' : 'debit';
+          type = 'debit';
           confidence = 0.65;
           warnings.push('Multiple amounts detected');
         }
       }
 
       if (amount <= 0 || isNaN(amount)) {
-        i++;
         continue;
       }
 
@@ -540,7 +462,7 @@ export class PDFParser {
       const oneYearFuture = new Date(now.getFullYear() + 1, 11, 31);
 
       if (parsedDate < threeYearsAgo || parsedDate > oneYearFuture) {
-        warnings.push('Date seems unusual - please verify');
+        warnings.push('Date seems unusual');
         confidence = Math.min(confidence, 0.5);
       }
 
@@ -552,8 +474,6 @@ export class PDFParser {
         confidence,
         warnings: warnings.length > 0 ? warnings : undefined
       });
-
-      i++;
     }
 
     return transactions;
@@ -594,9 +514,9 @@ export class PDFParser {
       const warnings: string[] = [];
 
       const date = dateIdx >= 0 ? this.parseDate(parts[dateIdx]) : new Date().toISOString().split('T')[0];
-      let description = descIdx >= 0 ? parts[descIdx] : 'Unknown';
+      let description = descIdx >= 0 ? parts[descIdx] : '';
 
-      if (!description || description === 'Unknown' || description.length < 3) continue;
+      if (!description || description.length < 2) continue;
 
       description = description.replace(/[\*#@]/g, '').trim();
 
