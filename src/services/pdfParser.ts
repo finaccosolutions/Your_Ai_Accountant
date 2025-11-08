@@ -314,6 +314,7 @@ export class PDFParser {
     }
 
     console.log(`PDF Parser: Processing ${lines.length} lines`);
+    console.log('PDF Parser: First 10 lines:', lines.slice(0, 10));
 
     let headerLine = -1;
     let columns: ColumnDefinition[] = [];
@@ -345,9 +346,17 @@ export class PDFParser {
 
     const datePattern = /\b(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}|\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}|\d{2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4})\b/;
 
+    console.log(`PDF Parser: Starting transaction parsing from line ${headerLine + 1}`);
+
+    let linesProcessed = 0;
+    let linesWithDates = 0;
+    let linesWithValidAmounts = 0;
+
     for (let i = headerLine + 1; i < lines.length; i++) {
       const line = lines[i];
       if (!line.trim() || line.trim().length < 10) continue;
+
+      linesProcessed++;
 
       const lineLower = line.toLowerCase();
 
@@ -369,8 +378,13 @@ export class PDFParser {
       if (!dateMatch) {
         // Try to extract transaction without strict date requirement
         // This helps with statements that have dates in different formats
+        if (linesProcessed <= 5) {
+          console.log(`PDF Parser: Line ${i} has no date:`, line);
+        }
         continue;
       }
+
+      linesWithDates++;
 
       const warnings: string[] = [];
       const date = this.parseDate(dateMatch[0]);
@@ -487,8 +501,13 @@ export class PDFParser {
       }
 
       if (amount <= 0 || isNaN(amount)) {
+        if (linesWithDates <= 5) {
+          console.log(`PDF Parser: Line ${i} has invalid amount:`, amount, 'from amounts:', amounts);
+        }
         continue;
       }
+
+      linesWithValidAmounts++;
 
       const parsedDate = new Date(date);
       const now = new Date();
@@ -511,11 +530,13 @@ export class PDFParser {
     }
 
     console.log(`PDF Parser: Extracted ${transactions.length} transactions`);
+    console.log(`PDF Parser: Stats - Lines processed: ${linesProcessed}, Lines with dates: ${linesWithDates}, Lines with valid amounts: ${linesWithValidAmounts}`);
 
     if (transactions.length === 0) {
-      console.warn('PDF Parser: No transactions extracted. Sample lines:');
-      lines.slice(0, 10).forEach((line, idx) => {
-        console.log(`Line ${idx}: ${line}`);
+      console.warn('PDF Parser: No transactions extracted.');
+      console.warn('PDF Parser: Showing first 20 lines after header:');
+      lines.slice(headerLine + 1, headerLine + 21).forEach((line, idx) => {
+        console.log(`Line ${headerLine + 1 + idx}: ${line}`);
       });
     }
 
