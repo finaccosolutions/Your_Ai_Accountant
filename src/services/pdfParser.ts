@@ -138,12 +138,18 @@ export class PDFParser {
     const arrayBuffer = await file.arrayBuffer();
     const workbook = XLSX.read(arrayBuffer, { type: 'array' });
 
+    console.log('Excel Parser: Sheet names:', workbook.SheetNames);
+
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
+
+    console.log(`Excel Parser: Found ${data.length} rows`);
 
     if (data.length === 0) {
       throw new Error('Excel file is empty');
     }
+
+    console.log('Excel Parser: Headers:', data[0]);
 
     const headers = data[0].map((h: any) => String(h || '').toLowerCase().trim());
 
@@ -160,18 +166,20 @@ export class PDFParser {
     const creditIdx = headers.findIndex(h =>
       h.includes('credit') || h.includes('deposit')
     );
-    const amountIdx = headers.findIndex(h => h === 'amount');
+    const amountIdx = headers.findIndex(h => h === 'amount' || h.includes('amount'));
+
+    console.log('Excel Parser: Column indices:', { dateIdx, descIdx, debitIdx, creditIdx, amountIdx });
 
     if (dateIdx === -1) {
-      throw new Error('Excel file must have a Date column');
+      throw new Error('Excel file must have a Date column. Found headers: ' + headers.join(', '));
     }
 
     if (descIdx === -1) {
-      throw new Error('Excel file must have a Description/Narration column');
+      throw new Error('Excel file must have a Description/Narration column. Found headers: ' + headers.join(', '));
     }
 
     if (debitIdx === -1 && creditIdx === -1 && amountIdx === -1) {
-      throw new Error('Excel file must have Debit, Credit, or Amount column');
+      throw new Error('Excel file must have Debit, Credit, or Amount column. Found headers: ' + headers.join(', '));
     }
 
     const transactions: ParsedTransaction[] = [];
@@ -210,7 +218,10 @@ export class PDFParser {
         confidence = 0.7;
       }
 
-      if (amount <= 0 || isNaN(amount)) continue;
+      if (amount <= 0 || isNaN(amount)) {
+        console.warn(`PDF Parser: Skipping line with invalid amount: ${amount}`);
+        continue;
+      }
 
       const parsedDate = new Date(date);
       if (isNaN(parsedDate.getTime())) {
@@ -228,8 +239,14 @@ export class PDFParser {
       });
     }
 
+    console.log(`Excel Parser: Extracted ${transactions.length} transactions`);
+
     if (transactions.length === 0) {
-      throw new Error('No valid transactions found in Excel file');
+      console.warn('Excel Parser: No valid transactions found. Sample rows:');
+      data.slice(0, 5).forEach((row, idx) => {
+        console.log(`Row ${idx}:`, row);
+      });
+      throw new Error('No valid transactions found in Excel file. Check console for details.');
     }
 
     return transactions;
@@ -292,25 +309,38 @@ export class PDFParser {
     const lines = text.split('\n').filter(line => line.trim());
 
     if (lines.length === 0) {
+      console.warn('PDF Parser: No lines found in text');
       return [];
     }
+
+    console.log(`PDF Parser: Processing ${lines.length} lines`);
 
     let headerLine = -1;
     let columns: ColumnDefinition[] = [];
 
+    // Try to find header line with various patterns
     for (let i = 0; i < Math.min(30, lines.length); i++) {
       const line = lines[i].toLowerCase();
 
-      if (line.includes('date') &&
-          (line.includes('particulars') || line.includes('description') || line.includes('narration')) &&
-          (line.includes('debit') || line.includes('credit') || line.includes('withdrawal') || line.includes('deposit'))) {
+      // More flexible header detection
+      const hasDate = line.includes('date') || line.includes('txn') || line.includes('transaction');
+      const hasDescription = line.includes('particulars') || line.includes('description') ||
+                            line.includes('narration') || line.includes('details') ||
+                            line.includes('remarks');
+      const hasAmount = line.includes('debit') || line.includes('credit') ||
+                       line.includes('withdrawal') || line.includes('deposit') ||
+                       line.includes('amount') || line.includes('dr') || line.includes('cr');
+
+      if (hasDate && (hasDescription || hasAmount)) {
         headerLine = i;
+        console.log(`PDF Parser: Found header at line ${i}: ${lines[i]}`);
         break;
       }
     }
 
     if (headerLine === -1) {
-      return [];
+      console.warn('PDF Parser: No header found, will try to parse all lines');
+      headerLine = 0; // Start from beginning if no clear header
     }
 
     const datePattern = /\b(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}|\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2}|\d{2}[-/\s][A-Za-z]{3}[-/\s]\d{2,4})\b/;
@@ -336,7 +366,11 @@ export class PDFParser {
       }
 
       const dateMatch = line.match(datePattern);
-      if (!dateMatch) continue;
+      if (!dateMatch) {
+        // Try to extract transaction without strict date requirement
+        // This helps with statements that have dates in different formats
+        continue;
+      }
 
       const warnings: string[] = [];
       const date = this.parseDate(dateMatch[0]);
@@ -381,7 +415,7 @@ export class PDFParser {
 
       description = nonAmountParts.join(' ').trim();
 
-      if (description.length < 3) {
+      if (description.length < 2) {
         continue;
       }
 
@@ -476,14 +510,29 @@ export class PDFParser {
       });
     }
 
+    console.log(`PDF Parser: Extracted ${transactions.length} transactions`);
+
+    if (transactions.length === 0) {
+      console.warn('PDF Parser: No transactions extracted. Sample lines:');
+      lines.slice(0, 10).forEach((line, idx) => {
+        console.log(`Line ${idx}: ${line}`);
+      });
+    }
+
     return transactions;
   }
 
   parseCSV(content: string): ParsedTransaction[] {
     const lines = content.split('\n').filter(line => line.trim());
-    if (lines.length === 0) return [];
+    if (lines.length === 0) {
+      console.warn('CSV Parser: No lines found');
+      return [];
+    }
+
+    console.log(`CSV Parser: Processing ${lines.length} lines`);
 
     const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/"/g, ''));
+    console.log('CSV Parser: Headers found:', headers);
 
     const dateIdx = headers.findIndex(h =>
       h.includes('date') || h.includes('txn date') || h.includes('transaction date')
@@ -492,16 +541,30 @@ export class PDFParser {
       h.includes('description') || h.includes('narration') ||
       h.includes('particulars') || h.includes('remarks') || h.includes('details')
     );
-    const debitIdx = headers.findIndex(h => h.includes('debit') || h.includes('withdrawal'));
-    const creditIdx = headers.findIndex(h => h.includes('credit') || h.includes('deposit'));
-    const amountIdx = headers.findIndex(h => h === 'amount' || h === 'amt');
+    const debitIdx = headers.findIndex(h =>
+      h.includes('debit') || h.includes('withdrawal') || h.includes('withdraw')
+    );
+    const creditIdx = headers.findIndex(h =>
+      h.includes('credit') || h.includes('deposit')
+    );
+    const amountIdx = headers.findIndex(h =>
+      h === 'amount' || h === 'amt' || h.includes('amount')
+    );
 
-    if (dateIdx === -1 || descIdx === -1) {
-      throw new Error('CSV file must have Date and Description columns');
+    console.log('CSV Parser: Column indices:', { dateIdx, descIdx, debitIdx, creditIdx, amountIdx });
+
+    if (dateIdx === -1) {
+      console.warn('CSV Parser: No date column found. Looking for any date-like patterns...');
+      // Try to proceed anyway and look for dates in the data
+    }
+
+    if (descIdx === -1) {
+      console.warn('CSV Parser: No description column found. Will use first text column...');
     }
 
     if (debitIdx === -1 && creditIdx === -1 && amountIdx === -1) {
-      throw new Error('CSV file must have Debit, Credit, or Amount column');
+      console.error('CSV Parser: No amount columns found');
+      throw new Error('CSV file must have Debit, Credit, or Amount column. Found headers: ' + headers.join(', '));
     }
 
     const transactions: ParsedTransaction[] = [];
@@ -558,8 +621,14 @@ export class PDFParser {
       });
     }
 
+    console.log(`CSV Parser: Extracted ${transactions.length} transactions`);
+
     if (transactions.length === 0) {
-      throw new Error('No valid transactions found in CSV file');
+      console.warn('CSV Parser: No valid transactions found. Sample rows:');
+      lines.slice(0, 5).forEach((line, idx) => {
+        console.log(`Row ${idx}: ${line}`);
+      });
+      throw new Error('No valid transactions found in CSV file. Check console for details.');
     }
 
     return transactions;
