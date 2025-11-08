@@ -21,17 +21,33 @@ export default function MappedTransactionsViewer({ onClose }: MappedTransactions
 
   const loadMappedTransactions = async () => {
     try {
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('*, category:categories(*), bank:banks(*)')
-        .eq('user_id', user!.id)
-        .eq('mapping_status', 'mapped')
-        .eq('is_approved', true)
-        .order('transaction_date', { ascending: false })
-        .order('created_at', { ascending: false });
+      const [transactionsResult, categoriesResult, banksResult] = await Promise.all([
+        supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', user!.id)
+          .eq('mapping_status', 'mapped')
+          .eq('is_approved', true)
+          .order('transaction_date', { ascending: false })
+          .order('created_at', { ascending: false }),
+        supabase.from('categories').select('*').or(`user_id.eq.${user!.id},is_system.eq.true`),
+        supabase.from('banks').select('*').eq('user_id', user!.id),
+      ]);
 
-      if (error) throw error;
-      if (data) setTransactions(data);
+      if (transactionsResult.error) throw transactionsResult.error;
+
+      if (transactionsResult.data) {
+        const enrichedTransactions = transactionsResult.data.map((t: any) => {
+          const bank = banksResult.data?.find((b: any) => b.id === t.bank_id);
+          const category = categoriesResult.data?.find((c: any) => c.id === t.category_id);
+          return {
+            ...t,
+            bank: bank || null,
+            category: category || null,
+          };
+        });
+        setTransactions(enrichedTransactions);
+      }
     } catch (error) {
       console.error('Error loading mapped transactions:', error);
     } finally {

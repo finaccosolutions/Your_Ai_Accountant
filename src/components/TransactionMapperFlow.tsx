@@ -34,7 +34,7 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
     try {
       let query = supabase
         .from('transactions')
-        .select('*, category:categories(*), bank:banks(*)')
+        .select('*')
         .eq('user_id', user!.id)
         .eq('mapping_status', 'unmapped')
         .order('transaction_date', { ascending: false });
@@ -43,15 +43,36 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
         query = query.eq('batch_id', batchId);
       }
 
-      const [transactionsResult, categoriesResult] = await Promise.all([
+      const [transactionsResult, categoriesResult, banksResult] = await Promise.all([
         query,
         supabase.from('categories').select('*').or(`user_id.eq.${user!.id},is_system.eq.true`).order('name'),
+        supabase.from('banks').select('*').eq('user_id', user!.id),
       ]);
 
-      if (transactionsResult.data) {
-        console.log('Loaded transactions:', transactionsResult.data.length);
-        setTransactions(transactionsResult.data);
+      if (transactionsResult.error) {
+        console.error('Transactions query error:', transactionsResult.error);
       }
+
+      if (transactionsResult.data && transactionsResult.data.length > 0) {
+        console.log('Loaded unmapped transactions:', transactionsResult.data.length);
+
+        // Attach related data
+        const enrichedTransactions = transactionsResult.data.map((t: any) => {
+          const bank = banksResult.data?.find((b: any) => b.id === t.bank_id);
+          const category = categoriesResult.data?.find((c: any) => c.id === t.category_id);
+          return {
+            ...t,
+            bank: bank || null,
+            category: category || null,
+          };
+        });
+
+        setTransactions(enrichedTransactions);
+      } else {
+        console.log('No unmapped transactions found');
+        setTransactions([]);
+      }
+
       if (categoriesResult.data) setCategories(categoriesResult.data);
     } catch (error) {
       console.error('Error loading transactions:', error);
