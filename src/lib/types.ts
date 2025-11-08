@@ -28,6 +28,8 @@ export interface Category {
   icon: string;
   color: string;
   is_system: boolean;
+  parent_category_id?: string;
+  is_payable_receivable?: boolean;
   created_at: string;
 }
 

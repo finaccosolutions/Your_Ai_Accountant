@@ -22,6 +22,7 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
   const [newCategory, setNewCategory] = useState({
     name: '',
     type: 'expense' as 'income' | 'expense',
+    parent_category_id: '',
   });
 
   useEffect(() => {
@@ -54,9 +55,6 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
       }
 
       if (transactionsResult.data && transactionsResult.data.length > 0) {
-        console.log('Loaded unmapped transactions:', transactionsResult.data.length);
-
-        // Attach related data
         const enrichedTransactions = transactionsResult.data.map((t: any) => {
           const bank = banksResult.data?.find((b: any) => b.id === t.bank_id);
           const category = categoriesResult.data?.find((c: any) => c.id === t.category_id);
@@ -69,7 +67,6 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
 
         setTransactions(enrichedTransactions);
       } else {
-        console.log('No unmapped transactions found');
         setTransactions([]);
       }
 
@@ -190,16 +187,22 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
     }
 
     try {
+      const insertData: any = {
+        user_id: user!.id,
+        name: newCategory.name,
+        type: newCategory.type,
+        icon: 'circle',
+        color: newCategory.type === 'income' ? '#10B981' : '#EF4444',
+        is_system: false,
+      };
+
+      if (newCategory.parent_category_id) {
+        insertData.parent_category_id = newCategory.parent_category_id;
+      }
+
       const { data, error } = await supabase
         .from('categories')
-        .insert({
-          user_id: user!.id,
-          name: newCategory.name,
-          type: newCategory.type,
-          icon: 'circle',
-          color: newCategory.type === 'income' ? '#10B981' : '#EF4444',
-          is_system: false,
-        })
+        .insert(insertData)
         .select()
         .single();
 
@@ -208,7 +211,7 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
       setCategories([...categories, data]);
       setEditedCategory(data.id);
       setShowAddCategory(false);
-      setNewCategory({ name: '', type: 'expense' });
+      setNewCategory({ name: '', type: 'expense', parent_category_id: '' });
     } catch (error) {
       console.error('Error adding category:', error);
       alert('Failed to add category');
@@ -307,6 +310,18 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
     (c) => c.type === (currentTransaction.type === 'debit' ? 'expense' : 'income')
   );
 
+  const parentCategories = relevantCategories.filter(
+    (c) => c.is_payable_receivable === true
+  );
+
+  const regularCategories = relevantCategories.filter(
+    (c) => !c.parent_category_id && !c.is_payable_receivable
+  );
+
+  const getSubcategories = (parentId: string) => {
+    return relevantCategories.filter((c) => c.parent_category_id === parentId);
+  };
+
   const transactionType = currentTransaction.type === 'credit' ? 'Deposit' : 'Withdrawal';
 
   return (
@@ -369,9 +384,16 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
         )}
 
         <div className="space-y-4">
+          {currentTransaction.original_description && (
+            <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
+              <p className="text-xs font-medium text-gray-600 mb-1">Original Bank Statement</p>
+              <p className="text-sm text-gray-900 font-mono">{currentTransaction.original_description}</p>
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Narration / Description
+              Description (Editable)
               {currentTransaction.ai_description && (
                 <span className="ml-2 text-blue-600 text-xs inline-flex items-center gap-1">
                   <Sparkles className="w-3 h-3" />
@@ -386,9 +408,7 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
               className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="Enter description"
             />
-            {currentTransaction.original_description !== editedDescription && (
-              <p className="text-xs text-gray-500 mt-1">Original: {currentTransaction.original_description}</p>
-            )}
+            <p className="text-xs text-gray-500 mt-1">You can edit this description for clarity</p>
           </div>
 
           <div>
@@ -412,12 +432,12 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
             </div>
 
             {showAddCategory && (
-              <div className="mb-3 p-3 bg-gray-50 rounded-xl space-y-2">
+              <div className="mb-3 p-4 bg-gray-50 rounded-xl space-y-3 border border-gray-200">
                 <input
                   type="text"
                   value={newCategory.name}
                   onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
-                  placeholder="Category name"
+                  placeholder="Category name (e.g., John Doe, Acme Corp)"
                   className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500"
                 />
                 <div className="flex gap-2">
@@ -438,6 +458,28 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
                     Income
                   </button>
                 </div>
+                {parentCategories.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Make this a sub-category under:
+                    </label>
+                    <select
+                      value={newCategory.parent_category_id}
+                      onChange={(e) => setNewCategory({ ...newCategory, parent_category_id: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 text-sm"
+                    >
+                      <option value="">None (Regular Category)</option>
+                      {parentCategories.map((parent) => (
+                        <option key={parent.id} value={parent.id}>
+                          {parent.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Use for tracking individual payables/receivables
+                    </p>
+                  </div>
+                )}
                 <button
                   onClick={handleAddCategory}
                   className="w-full bg-blue-500 text-white py-2 rounded-lg font-medium hover:bg-blue-600"
@@ -453,11 +495,33 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
               className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">Select category</option>
-              {relevantCategories.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name} {cat.is_system ? '' : '(Custom)'}
-                </option>
-              ))}
+
+              {regularCategories.length > 0 && (
+                <optgroup label="Regular Categories">
+                  {regularCategories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name} {cat.is_system ? '' : '(Custom)'}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+
+              {parentCategories.map((parent) => {
+                const subcategories = getSubcategories(parent.id);
+                return (
+                  <optgroup key={parent.id} label={parent.name}>
+                    {subcategories.length === 0 ? (
+                      <option value={parent.id}>{parent.name} (General)</option>
+                    ) : (
+                      subcategories.map((sub) => (
+                        <option key={sub.id} value={sub.id}>
+                          {sub.name}
+                        </option>
+                      ))
+                    )}
+                  </optgroup>
+                );
+              })}
             </select>
           </div>
 
@@ -520,12 +584,13 @@ export default function TransactionMapperFlow({ batchId, onClose }: TransactionM
       </button>
 
       <div className="bg-green-50 border border-green-200 rounded-2xl p-4">
-        <h4 className="font-semibold text-green-900 mb-2">Transaction Mapping Options:</h4>
+        <h4 className="font-semibold text-green-900 mb-2">Transaction Mapping Guide:</h4>
         <ul className="space-y-1 text-sm text-green-800">
-          <li>• <strong>Confirm All:</strong> Auto-approve all AI-suggested transactions</li>
-          <li>• <strong>Save & Next:</strong> Confirm current transaction and move to next</li>
-          <li>• <strong>Delete:</strong> Remove transaction from database</li>
-          <li>• <strong>Skip:</strong> Leave unmapped to handle later</li>
+          <li>• Original bank statement shown for reference (non-editable)</li>
+          <li>• AI-enhanced description is editable for clarity</li>
+          <li>• AI suggests categories based on description and learning</li>
+          <li>• Use Payables/Receivables categories for tracking specific parties</li>
+          <li>• Create sub-categories under Payables/Receivables for each person/company</li>
         </ul>
       </div>
     </div>
