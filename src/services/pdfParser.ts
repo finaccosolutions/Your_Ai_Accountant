@@ -309,12 +309,13 @@ export class PDFParser {
     const lines = text.split('\n').filter(line => line.trim());
 
     if (lines.length === 0) {
-      console.warn('PDF Parser: No lines found in text');
+      console.error('PDF Parser: No lines found in text - PDF may be empty or image-based');
       return [];
     }
 
     console.log(`PDF Parser: Processing ${lines.length} lines`);
-    console.log('PDF Parser: First 10 lines:', lines.slice(0, 10));
+    console.log('PDF Parser: First 20 lines:', lines.slice(0, 20));
+    console.log('PDF Parser: Text sample (first 500 chars):', text.substring(0, 500));
 
     let headerLine = -1;
     let columns: ColumnDefinition[] = [];
@@ -533,11 +534,99 @@ export class PDFParser {
     console.log(`PDF Parser: Stats - Lines processed: ${linesProcessed}, Lines with dates: ${linesWithDates}, Lines with valid amounts: ${linesWithValidAmounts}`);
 
     if (transactions.length === 0) {
-      console.warn('PDF Parser: No transactions extracted.');
-      console.warn('PDF Parser: Showing first 20 lines after header:');
-      lines.slice(headerLine + 1, headerLine + 21).forEach((line, idx) => {
-        console.log(`Line ${headerLine + 1 + idx}: ${line}`);
+      console.error('PDF Parser: No transactions extracted - Debugging information:');
+      console.error(`Header line index: ${headerLine}`);
+      console.error(`Total lines: ${lines.length}`);
+      console.error(`Lines processed after header: ${linesProcessed}`);
+      console.error(`Lines with valid dates: ${linesWithDates}`);
+      console.error(`Lines with valid amounts: ${linesWithValidAmounts}`);
+      console.error('First 30 lines after header:');
+      lines.slice(headerLine + 1, headerLine + 31).forEach((line, idx) => {
+        const dateMatch = line.match(datePattern);
+        const hasAmount = /\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?/.test(line);
+        console.error(`Line ${headerLine + 1 + idx}: [Date:${dateMatch ? 'YES' : 'NO'}, Amount:${hasAmount ? 'YES' : 'NO'}] ${line}`);
       });
+
+      // Try a more lenient parsing approach as fallback
+      console.warn('Attempting fallback parsing with relaxed rules...');
+      return this.parseTransactionsLenient(lines, headerLine, datePattern);
+    } else {
+      console.log('PDF Parser: Sample extracted transactions:', transactions.slice(0, 3));
+    }
+
+    return transactions;
+  }
+
+  // Lenient parsing method for PDFs that don't match standard format
+  private parseTransactionsLenient(lines: string[], startLine: number, datePattern: RegExp): ParsedTransaction[] {
+    const transactions: ParsedTransaction[] = [];
+    console.warn('Using lenient parser - will try to extract any line with date + amount');
+
+    for (let i = startLine + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line.trim() || line.trim().length < 10) continue;
+
+      // Skip obvious non-transaction lines
+      const lineLower = line.toLowerCase();
+      if (lineLower.includes('opening balance') || lineLower.includes('closing balance') ||
+          lineLower.includes('total') || lineLower.includes('statement') ||
+          lineLower.match(/^page\s+\d+/)) {
+        continue;
+      }
+
+      // Look for date
+      const dateMatch = line.match(datePattern);
+      if (!dateMatch) continue;
+
+      // Look for amounts (be more generous)
+      const amounts = line.match(/\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+\.\d{2}|\d+/g);
+      if (!amounts || amounts.length === 0) continue;
+
+      // Parse amounts
+      const parsedAmounts = amounts
+        .map(a => parseFloat(a.replace(/,/g, '')))
+        .filter(a => a > 0 && a < 100000000);
+
+      if (parsedAmounts.length === 0) continue;
+
+      // Get description by removing date and amounts
+      let description = line;
+      description = description.replace(datePattern, '');
+      amounts.forEach(amt => {
+        description = description.replace(amt, '');
+      });
+      description = description.replace(/\b(DR|CR|Dr|Cr|debit|credit)\b/gi, '').trim();
+      description = description.replace(/\s+/g, ' ').trim();
+
+      if (description.length < 3) {
+        description = 'Transaction';
+      }
+
+      // Determine type
+      const hasCreditMarker = /\bCR\b/i.test(line) || lineLower.includes('credit') || lineLower.includes('deposit');
+      const hasDebitMarker = /\bDR\b/i.test(line) || lineLower.includes('debit') || lineLower.includes('withdrawal');
+
+      const type: 'debit' | 'credit' = (hasCreditMarker && !hasDebitMarker) ? 'credit' : 'debit';
+      const amount = parsedAmounts[0];
+
+      try {
+        const date = this.parseDate(dateMatch[0]);
+        transactions.push({
+          date,
+          description: description.substring(0, 200),
+          amount,
+          type,
+          confidence: 0.5,
+          warnings: ['Extracted using lenient parser - please verify']
+        });
+      } catch (e) {
+        console.warn('Failed to parse date:', dateMatch[0]);
+      }
+    }
+
+    console.warn(`Lenient parser extracted ${transactions.length} transactions`);
+    if (transactions.length > 0) {
+      console.warn('Sample:', transactions.slice(0, 2));
     }
 
     return transactions;

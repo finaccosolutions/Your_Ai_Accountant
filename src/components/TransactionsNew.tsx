@@ -133,15 +133,27 @@ export default function TransactionsNew() {
       let bankInfo;
       let text = '';
 
+      console.log('Starting file analysis...', file.name);
+
       if (file.name.endsWith('.csv')) {
         text = await file.text();
+        console.log('CSV text length:', text.length);
         transactions = parser.parseCSV(text);
         bankInfo = parser.detectBankFromText(text);
       } else if (file.name.endsWith('.pdf')) {
+        console.log('Extracting text from PDF...');
         text = await parser.extractTextFromPDF(file);
+        console.log('Extracted text length:', text.length);
+        console.log('Text preview:', text.substring(0, 200));
+
         bankInfo = parser.detectBankFromText(text);
+        console.log('Detected bank:', bankInfo.bankName);
+
+        console.log('Parsing transactions from text...');
         transactions = parser.parseTransactions(text);
+        console.log('Parsed transactions count:', transactions.length);
       } else if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        console.log('Parsing Excel file...');
         transactions = await parser.parseExcel(file);
         const arrayBuffer = await file.arrayBuffer();
         const textDecoder = new TextDecoder();
@@ -149,14 +161,17 @@ export default function TransactionsNew() {
         bankInfo = parser.detectBankFromText(text);
       } else if (file.name.endsWith('.txt')) {
         text = await file.text();
+        console.log('Text file length:', text.length);
         transactions = parser.parseTransactions(text);
         bankInfo = parser.detectBankFromText(text);
       } else {
         throw new Error('Unsupported file format');
       }
 
+      console.log('Final transaction count:', transactions.length);
+
       if (transactions.length === 0) {
-        throw new Error('No transactions found in the file');
+        throw new Error('No transactions found in the file. Please check the browser console (F12) for detailed parsing information. The PDF may be image-based or have an unsupported format.');
       }
 
       const { data: batch, error: batchError } = await supabase
